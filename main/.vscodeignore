@@ -1,0 +1,17 @@
+.vscode/**
+.vscode-test/**
+src/**
+.gitignore
+.yarnrc
+webpack.config.js
+**/tsconfig.json
+**/.eslintrc.json
+**/*.map
+**/*.ts
+webview-ui/src/**
+webview-ui/node_modules/**
+webview-ui/public/**
+webview-ui/.gitignore
+webview-ui/package.json
+webview-ui/vite.config.ts
+webview-ui/tsconfig.json

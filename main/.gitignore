@@ -1,0 +1,12 @@
+out
+dist
+node_modules
+.vscode-test/
+*.vsix
+.DS_Store
+.env
+.prompthider.cache
+
+# Webview build artifacts
+webview-ui/dist
+webview-ui/node_modules

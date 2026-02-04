@@ -1,0 +1,158 @@
+{
+  "name": "vs-prompt-hider",
+  "displayName": "VS Prompt Hider",
+  "description": "Privacy-preserving middleware for AI assistants - anonymize sensitive data before sending prompts to LLMs",
+  "version": "0.0.1",
+  "publisher": "your-publisher-name",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kevin-CNC/vs-prompt-hider.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Snippets"
+  ],
+  "keywords": [
+    "privacy",
+    "security",
+    "ai",
+    "anonymization",
+    "pii",
+    "copilot",
+    "chatgpt"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "prompthider.anonymize",
+        "title": "Anonymize Selection",
+        "category": "Prompt Hider"
+      },
+      {
+        "command": "prompthider.openRuleEditor",
+        "title": "Open Rule Editor",
+        "category": "Prompt Hider"
+      },
+      {
+        "command": "prompthider.showMappings",
+        "title": "Show Token Mappings",
+        "category": "Prompt Hider"
+      },
+      {
+        "command": "prompthider.toggleAnonymization",
+        "title": "Toggle Auto-Anonymization",
+        "category": "Prompt Hider"
+      },
+      {
+        "command": "prompthider.clearMappings",
+        "title": "Clear Token Mappings",
+        "category": "Prompt Hider"
+      }
+    ],
+    "configuration": {
+      "title": "Prompt Hider",
+      "properties": {
+        "prompthider.autoAnonymize": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically anonymize sensitive data when detected"
+        },
+        "prompthider.showPreview": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show preview before anonymizing"
+        },
+        "prompthider.tokenConsistency": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use consistent tokens for the same values across sessions"
+        },
+        "prompthider.enabledPatterns": {
+          "type": "array",
+          "default": [
+            "ip",
+            "email",
+            "uuid",
+            "api-key"
+          ],
+          "description": "List of enabled pattern types"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "prompthider-sidebar",
+          "title": "Prompt Hider",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "prompthider-sidebar": [
+        {
+          "id": "prompthider.mappingsView",
+          "name": "Token Mappings"
+        },
+        {
+          "id": "prompthider.rulesView",
+          "name": "Anonymization Rules"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "when": "editorHasSelection",
+          "command": "prompthider.anonymize",
+          "group": "9_cutcopypaste"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "prompthider.anonymize",
+          "when": "editorIsOpen"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "webview:dev": "cd webview-ui && npm run dev",
+    "webview:build": "cd webview-ui && npm run build"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.56.0",
+    "glob": "^10.3.10",
+    "mocha": "^10.2.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.3",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {}
+}
