@@ -13,7 +13,13 @@ export interface ProjectConfig {
 }
 
 export class ConfigManager {
-    private configFileName = '.prompthider.json';
+    readonly configFileName = String();
+
+    constructor( ruleName:string | undefined ){
+        this.configFileName = ruleName || ".projectRuleSet";
+        this.loadProjectRules()
+    }
+
 
     async loadProjectRules(): Promise<AnonymizationRule[]> {
         // TODO: Load custom rules from .prompthider.json in workspace root
