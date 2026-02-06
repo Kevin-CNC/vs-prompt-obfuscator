@@ -9,10 +9,10 @@ import { window } from 'vscode';
 // import { RuleEditorProvider } from './ui/RuleEditorProvider';
 // import { MappingsViewProvider } from './ui/MappingsViewProvider';
 
-function randomStringGen(length: number): string {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+function randomStringGen(size: number): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let result = '';
-    for (let i = 0; i < length; i++) {
+    for (let i = 0; i < size; i++) {
         result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return result;
@@ -20,7 +20,7 @@ function randomStringGen(length: number): string {
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('The prompt hider is online.');
-    let selectedFile: vscode.Uri | undefined;
+    let selectedFile:vscode.Uri | undefined = undefined;
 
     // will check if a file already exists in the folder and if so, directly load that one
     const prmptHidFiles = await vscode.workspace.findFiles('**/*.prompthider.json');
@@ -46,13 +46,13 @@ export async function activate(context: vscode.ExtensionContext) {
             placeHolder: 'Enter your rule file name (Else press enter for default name).'
         });
 
-        if ( givenName == undefined )  { givenName = "default" } // assign 'default' if no name is given
+        if ( givenName == undefined )  { givenName = `default-${randomStringGen(5)}` } // assign 'default' if no name is given
 
         const workspaceFldrs = vscode.workspace.workspaceFolders;
         if ( workspaceFldrs && workspaceFldrs.length > 0 ){
             const workspaceUri = workspaceFldrs[0].uri;
 
-            const newFPath = path.join(workspaceUri.fsPath, `${givenName}.prompthider.json`);
+            const newFPath = path.join(workspaceUri.fsPath,  `${givenName}.prompthider.json`);
             selectedFile = vscode.Uri.file(newFPath);
 
             // actually creating the file
@@ -60,14 +60,14 @@ export async function activate(context: vscode.ExtensionContext) {
             await vscode.workspace.fs.writeFile(selectedFile, content);
 
             vscode.window.showInformationMessage(`Created rule file: ${path.basename(selectedFile.fsPath)} !`);
-        }
+        }}
 
         
 
 
 
     const tokenManager = new TokenManager(context);
-    const configs = new ConfigManager(userResponse);
+    const configs = new ConfigManager(selectedFile);
     const anonymizationEngine = new AnonymizationEngine(tokenManager, configs);
 
     // TODO: Register UI providers (webviews, tree views, etc.)
@@ -104,3 +104,4 @@ export async function activate(context: vscode.ExtensionContext) {
 export function deactivate() {
     console.log('VS Prompt Hider deactivated');
 }
+
