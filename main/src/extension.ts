@@ -24,7 +24,13 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // will check if a file already exists in the folder and if so, directly load that one
     const prmptHidFiles = await vscode.workspace.findFiles('**/*.prompthider.json');
-    if ( prmptHidFiles.length > 0 ){ // multiple -> choose one
+
+    if ( prmptHidFiles.length == 1 ){ // one -> load it
+        selectedFile = prmptHidFiles[0];
+        vscode.window.showInformationMessage(`Rulesheet found: ${path.basename(selectedFile.fsPath)}. Loading it for the session.`);
+
+
+    }else if ( prmptHidFiles.length > 1 ){ // multiple -> choose one
         const items = prmptHidFiles.map(file => ({
             label: vscode.workspace.asRelativePath(file),
             description: file.fsPath,
@@ -37,6 +43,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
         if (picked) {
             selectedFile = picked.fileUri;
+        }else{
+            // default to the first file found
+            selectedFile = prmptHidFiles[0];
+            vscode.window.showInformationMessage(`No file picked, defaulting to the first one found: ${path.basename(selectedFile.fsPath)}.`);
         }
 
     }else if ( prmptHidFiles.length === 0 ){ // none -> create one
@@ -48,7 +58,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         if ( givenName == undefined )  { givenName = `default-${randomStringGen(5)}` } // assign 'default' if no name is given
 
-        const workspaceFldrs = vscode.workspace.workspaceFolders;
+        const workspaceFldrs = vscode.workspace.workspaceFolders;692
         if ( workspaceFldrs && workspaceFldrs.length > 0 ){
             const workspaceUri = workspaceFldrs[0].uri;
 
@@ -64,7 +74,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         
 
-
+6
 
     const tokenManager = new TokenManager(context);
     const configs = new ConfigManager(selectedFile);
@@ -73,13 +83,20 @@ export async function activate(context: vscode.ExtensionContext) {
     // TODO: Register UI providers (webviews, tree views, etc.)
 
     // TODO: Register commands
+
+    // Anonymize command toggle;
+    // Informs the user if their prompts will be anonymized or not.
+    // Switch toggle functionality.
+    let anonSwitch = false;
     const anonymizeCommand = vscode.commands.registerCommand(
         'prompthider.anonymize',
         async () => {
-            // TODO: Implement anonymization logic
-            vscode.window.showInformationMessage('Anonymize command triggered!');
+            anonSwitch = !anonSwitch;
+
+            vscode.window.showInformationMessage(`Anonymize prompts set to: ${anonSwitch}`);
         }
     );
+
 
     const openRuleEditorCommand = vscode.commands.registerCommand(
         'prompthider.openRuleEditor',
