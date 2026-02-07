@@ -91,8 +91,17 @@ export async function activate(context: vscode.ExtensionContext) {
             const newFPath = path.join(promptHiderFolder, `${givenName}.prompthider.json`);
             selectedFile = vscode.Uri.file(newFPath);
 
-            // actually creating the file
-            const content = Buffer.from('{}', 'utf8');
+            // actually creating the file & adding default data
+            const defaultData = {
+                version: "0",
+                enabled: false,
+                rules: [],
+                tokenConsistency: false,
+                autoAnonymize: false,
+                showPreview: true
+            };
+            
+            const content = Buffer.from(JSON.stringify(defaultData, null, 4), 'utf8');
             await vscode.workspace.fs.writeFile(selectedFile, content);
 
             vscode.window.showInformationMessage(`Created rule file: ${path.basename(selectedFile.fsPath)} !`);
