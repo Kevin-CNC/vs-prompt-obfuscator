@@ -10,15 +10,6 @@ import * as fs from 'fs';
 // import { RuleEditorProvider } from './ui/RuleEditorProvider';
 // import { MappingsViewProvider } from './ui/MappingsViewProvider';
 
-function randomStringGen(size: number): string {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = '';
-    for (let i = 0; i < size; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-}
-
 function updateDevFiles(rulesheetRelativePath: string) {
     // for now only target .gitignore and .copilotignore
 
