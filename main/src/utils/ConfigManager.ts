@@ -21,9 +21,41 @@ export class ConfigManager {
     }
 
 
+    // helper for getting the workspace root path
+    private getWorkspacePth(): string{
+        const workspace = vscode.workspace.workspaceFolders;
+
+        if ( workspace === undefined || workspace.length === 0){
+            throw new Error('No workspace folder open');
+        }
+
+        return workspace[0].uri.fsPath;
+    }
+
+
+    private rulesheetExists(pathOfRulesheet:string): boolean{
+        return fs.existsSync(pathOfRulesheet);
+    }
+
+
     async loadProjectRules(): Promise<AnonymizationRule[]> {
         // TODO: Load custom rules from .prompthider.json in workspace root
-        // 1. Get workspace folder
+        try{
+            const workspace = this.getWorkspacePth();
+            const rulesheetPath = path.join(workspace, this.configFileName)
+            
+            // before anything, check if the rulesheet actually exists.
+            if(!this.rulesheetExists( rulesheetPath )){
+                console.log(`Config file not found at ${rulesheetPath}`);
+                return [];
+            }
+
+
+        }catch(error){
+
+        }
+
+        // Get workspace folder
         // 2. Check if .prompthider.json exists
         // 3. Parse JSON and return rules array
         return [];
