@@ -81,14 +81,14 @@ export async function activate(context: vscode.ExtensionContext) {
         const workspaceFldrs = vscode.workspace.workspaceFolders;
         if (workspaceFldrs && workspaceFldrs.length > 0) {
             const workspaceUri = workspaceFldrs[0].uri;
-            const vscodeFolder = path.join(workspaceUri.fsPath, '.vscode');
+            const promptHiderFolder = path.join(workspaceUri.fsPath, '.prompthider');
 
-            // Ensure .vscode folder exists
-            if (!fs.existsSync(vscodeFolder)) {
-                fs.mkdirSync(vscodeFolder, { recursive: true });
+            // Ensure .prompthider folder exists
+            if (!fs.existsSync(promptHiderFolder)) {
+                fs.mkdirSync(promptHiderFolder, { recursive: true });
             }
 
-            const newFPath = path.join(vscodeFolder, `${givenName}.prompthider.json`);
+            const newFPath = path.join(promptHiderFolder, `${givenName}.prompthider.json`);
             selectedFile = vscode.Uri.file(newFPath);
 
             // actually creating the file
