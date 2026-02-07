@@ -21,8 +21,15 @@ function randomStringGen(size: number): string {
 
 function updateDevFiles(rulesheetPath: string, fileName: string) {
     // currently targets .gitignore & .copilotignore
-    const gitIgnore = path.join(__dirname, '..', '.gitignore');
-    const copilotIgnore = path.join(__dirname, '..', '.copilotignore');
+
+    // get current workspace folder path
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) return;
+    const workspacePath = workspaceFolders[0].uri.fsPath;
+
+    // find the files & update them
+    const gitIgnore = path.join(workspacePath, '.gitignore');
+    const copilotIgnore = path.join(workspacePath, '.copilotignore');
 
     for (const ignoreFile of [gitIgnore, copilotIgnore]) {
         // Only update if file exists; does NOT create if missing.6
