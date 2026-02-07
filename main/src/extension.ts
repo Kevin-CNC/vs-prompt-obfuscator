@@ -19,29 +19,29 @@ function randomStringGen(size: number): string {
     return result;
 }
 
-function updateDevFiles(rulesheetPath: string, fileName: string) {
-    // currently targets .gitignore & .copilotignore
+function updateDevFiles(rulesheetRelativePath: string) {
+    // for now only target .gitignore and .copilotignore
 
-    // get current workspace folder path
+    // check current workspace folder for files to append the rulesheet to
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) return;
     const workspacePath = workspaceFolders[0].uri.fsPath;
 
-    // find the files & update them
-    const gitIgnore = path.join(workspacePath, '.gitignore');
-    const copilotIgnore = path.join(workspacePath, '.copilotignore');
+    // add more files later
+    const ignoreFiles = [
+        path.join(workspacePath, '.gitignore'),
+        path.join(workspacePath, '.copilotignore')
+    ];
 
-    for (const ignoreFile of [gitIgnore, copilotIgnore]) {
-        // Only update if file exists; does NOT create if missing.6
+
+    // for each file update by appending at the end (only if file exists of course)
+    for (const ignoreFile of ignoreFiles) {
         if (fs.existsSync(ignoreFile)) {
             const cnt = fs.readFileSync(ignoreFile, 'utf8');
-            if (!cnt.includes(rulesheetPath)) {
-                fs.appendFileSync(ignoreFile, rulesheetPath + '\n');
-            } else {
-                fs.writeFileSync(ignoreFile, `${fileName}\n`);
+            if (!cnt.includes(rulesheetRelativePath)) {
+                fs.appendFileSync(ignoreFile, `${rulesheetRelativePath}\n`);
             }
         }
-        // If file does not exist, nothing happens!
     }
 
     vscode.window.showInformationMessage(`Rulesheet added to dev files.`);
@@ -49,18 +49,15 @@ function updateDevFiles(rulesheetPath: string, fileName: string) {
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('The prompt hider is online.');
-    let selectedFile:vscode.Uri | undefined = undefined;
+    let selectedFile: vscode.Uri | undefined = undefined;
 
     // will check if a file already exists in the folder and if so, directly load that one
     const prmptHidFiles = await vscode.workspace.findFiles('**/*.prompthider.json');
 
-    if ( prmptHidFiles.length == 1 ){ // one -> load it
+    if (prmptHidFiles.length === 1) { // one -> load it
         selectedFile = prmptHidFiles[0];
         vscode.window.showInformationMessage(`Rulesheet found: ${path.basename(selectedFile.fsPath)}. Loading it for the session.`);
-
-
-
-    }else if ( prmptHidFiles.length > 1 ){ // multiple -> choose one
+    } else if (prmptHidFiles.length > 1) { // multiple -> choose one
         const items = prmptHidFiles.map(file => ({
             label: vscode.workspace.asRelativePath(file),
             description: file.fsPath,
@@ -73,26 +70,34 @@ export async function activate(context: vscode.ExtensionContext) {
 
         if (picked) {
             selectedFile = picked.fileUri;
-        }else{
+        } else {
             // default to the first file found
             selectedFile = prmptHidFiles[0];
             vscode.window.showInformationMessage(`No file picked, defaulting to the first one found: ${path.basename(selectedFile.fsPath)}.`);
         }
+    } else if (prmptHidFiles.length === 0) { // none -> create one
+        console.log("No rule files found, creating a new one with default name.");
 
-    }else if ( prmptHidFiles.length === 0 ){ // none -> create one
-        console.log("No rule files found, creating a new one with default name.")
-
-        let givenName = await window.showInputBox({
+        
+        let givenName = await vscode.window.showInputBox({
             placeHolder: 'Enter your rule file name (Else press enter for default name).'
         });
 
-        if ( givenName == undefined )  { givenName = `default-${randomStringGen(5)}` } // assign 'default' if no name is given
+        if (givenName === undefined || givenName === '') {
+            givenName = 'defaultSheet';
+        }
 
-        const workspaceFldrs = vscode.workspace.workspaceFolders;692
-        if ( workspaceFldrs && workspaceFldrs.length > 0 ){
+        const workspaceFldrs = vscode.workspace.workspaceFolders;
+        if (workspaceFldrs && workspaceFldrs.length > 0) {
             const workspaceUri = workspaceFldrs[0].uri;
+            const vscodeFolder = path.join(workspaceUri.fsPath, '.vscode');
 
-            const newFPath = path.join(workspaceUri.fsPath,  `${givenName}.prompthider.json`);
+            // Ensure .vscode folder exists
+            if (!fs.existsSync(vscodeFolder)) {
+                fs.mkdirSync(vscodeFolder, { recursive: true });
+            }
+
+            const newFPath = path.join(vscodeFolder, `${givenName}.prompthider.json`);
             selectedFile = vscode.Uri.file(newFPath);
 
             // actually creating the file
@@ -101,15 +106,23 @@ export async function activate(context: vscode.ExtensionContext) {
 
             vscode.window.showInformationMessage(`Created rule file: ${path.basename(selectedFile.fsPath)} !`);
 
-            updateDevFiles(`/${path.basename(selectedFile.fsPath)}`, selectedFile.fsPath);
+            const relPath = path.relative(workspaceUri.fsPath, selectedFile.fsPath).replace(/\\/g, '/');
+            updateDevFiles(relPath);
         }
     }
+
+    // Ensure selectedFile is defined before proceeding
+    if (!selectedFile) {
+        vscode.window.showErrorMessage('No rulesheet file selected or created.');
+        return;
+    }
+
 
         
 
 
     const tokenManager = new TokenManager(context);
-    const configs = new ConfigManager(selectedFile);
+    const configs = new ConfigManager(selectedFile.fsPath);
     const anonymizationEngine = new AnonymizationEngine(tokenManager, configs);
 
     // TODO: Register UI providers (webviews, tree views, etc.)
