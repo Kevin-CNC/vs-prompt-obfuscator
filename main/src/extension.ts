@@ -4,6 +4,7 @@ import { AnonymizationEngine } from './anonymizer/AnonymizationEngine';
 import { TokenManager } from './anonymizer/TokenManager';
 import { ConfigManager } from './utils/ConfigManager';
 import { window } from 'vscode';
+import * as fs from 'fs';
 
 // TODO: Import UI providers when ready
 // import { RuleEditorProvider } from './ui/RuleEditorProvider';
@@ -18,6 +19,27 @@ function randomStringGen(size: number): string {
     return result;
 }
 
+function updateDevFiles(rulesheetPath: string, fileName: string) {
+    // currently targets .gitignore & .copilotignore
+    const gitIgnore = path.join(__dirname, '..', '.gitignore');
+    const copilotIgnore = path.join(__dirname, '..', '.copilotignore');
+
+    for (const ignoreFile of [gitIgnore, copilotIgnore]) {
+        // Only update if file exists; does NOT create if missing.6
+        if (fs.existsSync(ignoreFile)) {
+            const cnt = fs.readFileSync(ignoreFile, 'utf8');
+            if (!cnt.includes(rulesheetPath)) {
+                fs.appendFileSync(ignoreFile, rulesheetPath + '\n');
+            } else {
+                fs.writeFileSync(ignoreFile, `${fileName}\n`);
+            }
+        }
+        // If file does not exist, nothing happens!
+    }
+
+    vscode.window.showInformationMessage(`Rulesheet added to dev files.`);
+}
+
 export async function activate(context: vscode.ExtensionContext) {
     console.log('The prompt hider is online.');
     let selectedFile:vscode.Uri | undefined = undefined;
@@ -28,6 +50,7 @@ export async function activate(context: vscode.ExtensionContext) {
     if ( prmptHidFiles.length == 1 ){ // one -> load it
         selectedFile = prmptHidFiles[0];
         vscode.window.showInformationMessage(`Rulesheet found: ${path.basename(selectedFile.fsPath)}. Loading it for the session.`);
+
 
 
     }else if ( prmptHidFiles.length > 1 ){ // multiple -> choose one
@@ -70,11 +93,13 @@ export async function activate(context: vscode.ExtensionContext) {
             await vscode.workspace.fs.writeFile(selectedFile, content);
 
             vscode.window.showInformationMessage(`Created rule file: ${path.basename(selectedFile.fsPath)} !`);
-        }}
+
+            updateDevFiles(`/${path.basename(selectedFile.fsPath)}`, selectedFile.fsPath);
+        }
+    }
 
         
 
-6
 
     const tokenManager = new TokenManager(context);
     const configs = new ConfigManager(selectedFile);
