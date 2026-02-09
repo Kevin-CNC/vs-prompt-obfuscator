@@ -33,19 +33,29 @@
   "contributes": {
     "commands": [
       {
+        "command": "prompthider.activate",
+        "title": "Create Rulesheet",
+        "category": "Prompt Hider"
+      },
+      {
+        "command": "prompthider.openUI",
+        "title": "Open Main UI",
+        "category": "Prompt Hider"
+      },
+      {
         "command": "prompthider.anonymize",
         "title": "Anonymize Selection",
-        "category": "Prompt Hider"
+        "category": "Prompt Hider - Quick Actions"
       },
       {
         "command": "prompthider.openRuleEditor",
         "title": "Open Rule Editor",
-        "category": "Prompt Hider"
+        "category": "Prompt Hider - Quick Actions"
       },
       {
         "command": "prompthider.showMappings",
         "title": "Show Token Mappings",
-        "category": "Prompt Hider"
+        "category": "Prompt Hider - Quick Actions"
       },
       {
         "command": "prompthider.toggleAnonymization",
@@ -151,8 +161,11 @@
     "mocha": "^10.2.0",
     "ts-loader": "^9.5.1",
     "typescript": "^5.3.3",
-    "vscode": "^1.1.37",
+    "vscode": "^1.1.34",
     "webpack": "^5.89.0",
     "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "vue": "^3.5.28"
   }
 }
