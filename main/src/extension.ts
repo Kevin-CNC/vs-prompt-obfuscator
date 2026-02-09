@@ -4,6 +4,7 @@ import { AnonymizationEngine } from './anonymizer/AnonymizationEngine';
 import { TokenManager } from './anonymizer/TokenManager';
 import { ConfigManager } from './utils/ConfigManager';
 import { window } from 'vscode';
+import { mainUIProvider } from './ui/mainUiProvider';
 import * as fs from 'fs';
 
 // TODO: Import UI providers when ready
@@ -69,7 +70,7 @@ export async function activate(context: vscode.ExtensionContext) {
     } else if (prmptHidFiles.length === 0) { // none -> create one
         console.log("No rule files found, creating a new one with default name.");
 
-        
+        mainUIProvider.show(context);
         let givenName = await vscode.window.showInputBox({
             placeHolder: 'Enter your rule file name (Else press enter for default name).'
         });
@@ -132,6 +133,9 @@ export async function activate(context: vscode.ExtensionContext) {
     // Anonymize command toggle;
     // Informs the user if their prompts will be anonymized or not.
     // Switch toggle functionality.
+
+
+    // COMMANDS HERE FOR THE EXTENSION
     let anonSwitch = false;
     const anonymizeCommand = vscode.commands.registerCommand(
         'prompthider.anonymize',
@@ -141,6 +145,14 @@ export async function activate(context: vscode.ExtensionContext) {
             vscode.window.showInformationMessage(`Anonymize prompts set to: ${anonSwitch}`);
         }
     );
+
+
+    const openWebUI = vscode.commands.registerCommand(
+        'prompthider.openUI',
+        () => {
+            vscode.window.showInformationMessage('Opening main ui...');
+            mainUIProvider.show(context);
+        });
 
 
     const openRuleEditorCommand = vscode.commands.registerCommand(
@@ -159,7 +171,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         anonymizeCommand,
-        openRuleEditorCommand
+        openRuleEditorCommand,
+        openWebUI
     );
 }
 
