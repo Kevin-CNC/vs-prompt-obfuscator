@@ -50,9 +50,7 @@ export class ConfigManager {
     }
 
 
-
     async loadProjectRules(): Promise<AnonymizationRule[]> {
-        // TODO: Load custom rules from .prompthider.json in workspace root
         try{
             const workspace = this.getWorkspacePth();
             const rulesheetPath = path.join(workspace, this.configFileName)
@@ -79,14 +77,36 @@ export class ConfigManager {
             console.error("Error loading project rules:", error);
             throw new Error(`Failed to load rules: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
-
-        // Get workspace folder
-        // 2. Check if .prompthider.json exists
-        // 3. Parse JSON and return rules array
-        return [];
     }
 
     async saveProjectRules(rules: AnonymizationRule[]): Promise<void> {
+        try{
+            const workspace = this.getWorkspacePth();
+            const rulesheetPath = path.join(workspace, this.configFileName);
+
+            // before anything, check if the rulesheet actually exists.
+            if(!this.rulesheetExists( rulesheetPath )){
+                console.log(`Config file not found at ${rulesheetPath}`);
+                throw new Error('Config file not found!');
+            }
+
+
+            // insert the new rules into the existing config structure, then write it back to the file.
+            let currentContent = fs.readFileSync(rulesheetPath, 'utf-8');
+            let newConfig = JSON.parse(currentContent) as ProjectConfig;
+            
+            if (this.isActuallyWellParsed(newConfig)){ // Check for structure integrity & then apply
+                newConfig.rules = rules;
+                fs.writeFileSync(rulesheetPath, JSON.stringify(newConfig, null, 2), 'utf-8');
+                vscode.window.showInformationMessage(`New configs have been applied!`);
+            }else{
+                throw new Error('Parsed structure of config file is invalid, cannot apply new rules');
+            }
+
+
+        }catch(error){
+            
+        }
         // TODO: Save rules to .prompthider.json
         // 1. Get workspace folder
         // 2. Load existing config or create new
@@ -98,16 +118,5 @@ export class ConfigManager {
         // 1. Check workspace exists
         // 2. Check file doesn't already exist
         // 3. Create with default config structure
-    }
-
-    private createDefaultConfig(rules: AnonymizationRule[]): ProjectConfig {
-        return {
-            version: '1.0',
-            enabled: true,
-            rules: rules,
-            tokenConsistency: true,
-            autoAnonymize: true,
-            showPreview: true
-        };
     }
 }
