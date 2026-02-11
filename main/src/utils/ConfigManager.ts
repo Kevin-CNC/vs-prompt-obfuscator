@@ -13,11 +13,10 @@ export interface ProjectConfig {
 }
 
 export class ConfigManager {
-    readonly configFileName = String();
+    private configFilePath: string;
 
-    constructor( ruleName:string | undefined ){
-        this.configFileName = ruleName || ".projectRuleSet";
-        this.loadProjectRules()
+    constructor(ruleFilePath: string) {
+        this.configFilePath = ruleFilePath;
     }
 
 
@@ -52,16 +51,13 @@ export class ConfigManager {
 
     async loadProjectRules(): Promise<AnonymizationRule[]> {
         try{
-            const workspace = this.getWorkspacePth();
-            const rulesheetPath = path.join(workspace, this.configFileName)
-            
             // before anything, check if the rulesheet actually exists.
-            if(!this.rulesheetExists( rulesheetPath )){
-                console.log(`Config file not found at ${rulesheetPath}`);
+            if(!this.rulesheetExists(this.configFilePath)){
+                console.log(`Config file not found at ${this.configFilePath}`);
                 return [];
             }
 
-            let content = fs.readFileSync(rulesheetPath, 'utf-8');
+            let content = fs.readFileSync(this.configFilePath, 'utf-8');
 
             // parse the content and return the configs object after checking if it's valid.
             let config: ProjectConfig = JSON.parse(content);
@@ -75,29 +71,26 @@ export class ConfigManager {
 
         }catch(error){
             console.error("Error loading project rules:", error);
-            throw new Error(`Failed to load rules: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            return [];
         }
     }
 
     async saveProjectRules(rules: AnonymizationRule[]): Promise<void> {
         try{
-            const workspace = this.getWorkspacePth();
-            const rulesheetPath = path.join(workspace, this.configFileName);
-
             // before anything, check if the rulesheet actually exists.
-            if(!this.rulesheetExists( rulesheetPath )){
-                console.log(`Config file not found at ${rulesheetPath}`);
+            if(!this.rulesheetExists(this.configFilePath)){
+                console.log(`Config file not found at ${this.configFilePath}`);
                 throw new Error('Config file not found!');
             }
 
 
             // insert the new rules into the existing config structure, then write it back to the file.
-            let currentContent = fs.readFileSync(rulesheetPath, 'utf-8');
+            let currentContent = fs.readFileSync(this.configFilePath, 'utf-8');
             let newConfig = JSON.parse(currentContent) as ProjectConfig;
             
             if (this.isActuallyWellParsed(newConfig)){ // Check for structure integrity & then apply
                 newConfig.rules = rules;
-                fs.writeFileSync(rulesheetPath, JSON.stringify(newConfig, null, 2), 'utf-8');
+                fs.writeFileSync(this.configFilePath, JSON.stringify(newConfig, null, 2), 'utf-8');
                 vscode.window.showInformationMessage(`New configs have been applied!`);
             }else{
                 throw new Error('Parsed structure of config file is invalid, cannot apply new rules');
@@ -105,12 +98,9 @@ export class ConfigManager {
 
 
         }catch(error){
-            
+            console.error("Error saving project rules:", error);
+            vscode.window.showInformationMessage(`An error occurred while saving your new rules.`);
         }
-        // TODO: Save rules to .prompthider.json
-        // 1. Get workspace folder
-        // 2. Load existing config or create new
-        // 3. Update rules and write to file
     }
 
     async initializeProjectConfig(): Promise<void> {

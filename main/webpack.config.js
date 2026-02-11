@@ -42,11 +42,10 @@ const config = {
   plugins: [
     new CopyPlugin({
         patterns: [
-            { from: 'src/ui/styles.css', to: 'styles.css' },
-            { from: 'src/ui/webview.html', to: 'webview.html' },
             {
                 from: path.resolve(__dirname, 'webview-ui', 'dist'),
-                to: path.resolve(__dirname, 'dist', 'webview')
+                to: path.resolve(__dirname, 'dist', 'webview'),
+                noErrorOnMissing: true
             }
         ]
     })

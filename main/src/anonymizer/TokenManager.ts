@@ -8,49 +8,91 @@ export class TokenManager {
 
     constructor(context: vscode.ExtensionContext) {
         this.context = context;
-        // TODO: Load persisted mappings from workspace state
+        this.loadMappings();
     }
 
     generateToken(type: string, originalValue: string): string {
-        // TODO: Check if value already has a token (for consistency)
-        // TODO: Generate new token with incremental counter
-        // TODO: Store bidirectional mapping (original <-> token)
-        // TODO: Persist to VS Code's workspace state
+        // Check if value already has a token (for consistency)
+        const existing = this.mappings.get(originalValue);
+        if (existing) {
+            return existing;
+        }
+
+        // Get or initialize counter for this type
+        const count = (this.counters.get(type) || 0) + 1;
+        this.counters.set(type, count);
+
+        // Generate new token
+        const token = this.formatToken(type, count);
+
+        // Store bidirectional mapping
+        this.mappings.set(originalValue, token);
+        this.reverseMappings.set(token, originalValue);
+
+        // Persist to VS Code's workspace state
+        this.saveMappings();
         
-        return `${type.toUpperCase()}_1`; // Placeholder
+        return token;
     }
 
     private formatToken(type: string, index: number): string {
-        // TODO: Format tokens based on type
-        // Examples:
-        // - 'ip' -> 'IP_1', 'IP_2'
-        // - 'email' -> 'USER_A@domain.tld'
-        // - 'api-key' -> 'API_KEY_v1'
-        return `${type.toUpperCase()}_${index}`;
+        // Format tokens based on type
+        switch(type.toLowerCase()) {
+            case 'ip':
+                return `IP_${index}`;
+            case 'email':
+                return `USER_${String.fromCharCode(64 + index)}@domain.tld`;
+            case 'api-key':
+                return `API_KEY_v${index}`;
+            case 'uuid':
+                return `UUID_${index}`;
+            case 'secret':
+                return `SECRET_${index}`;
+            case 'jwt':
+                return `JWT_TOKEN_${index}`;
+            case 'path':
+                return `/PATH_${index}`;
+            default:
+                return `${type.toUpperCase()}_${index}`;
+        }
     }
 
     getOriginalValue(token: string): string | undefined {
-        // TODO: Reverse lookup: token -> original value
         return this.reverseMappings.get(token);
     }
 
     getAllMappings(): Map<string, string> {
-        // TODO: Return copy of all mappings
         return new Map(this.mappings);
     }
 
     clearMappings(): void {
-        // TODO: Clear all mappings and reset counters
-        // TODO: Persist cleared state
+        this.mappings.clear();
+        this.reverseMappings.clear();
+        this.counters.clear();
+        this.saveMappings();
     }
 
     private saveMappings(): void {
-        // TODO: Persist mappings to VS Code workspace state
-        // Use: this.context.workspaceState.update('key', data)
+        // Persist mappings to VS Code workspace state
+        const mappingsArray = Array.from(this.mappings.entries());
+        const countersArray = Array.from(this.counters.entries());
+        
+        this.context.workspaceState.update('prompthider.mappings', mappingsArray);
+        this.context.workspaceState.update('prompthider.counters', countersArray);
     }
 
     private loadMappings(): void {
-        // TODO: Load mappings from VS Code workspace state
-        // Use: this.context.workspaceState.get('key')
+        // Load mappings from VS Code workspace state
+        const mappingsArray = this.context.workspaceState.get<Array<[string, string]>>('prompthider.mappings', []);
+        const countersArray = this.context.workspaceState.get<Array<[string, number]>>('prompthider.counters', []);
+        
+        this.mappings = new Map(mappingsArray);
+        this.counters = new Map(countersArray);
+        
+        // Rebuild reverse mappings
+        this.reverseMappings.clear();
+        for (const [original, token] of this.mappings) {
+            this.reverseMappings.set(token, original);
+        }
     }
 }

@@ -4,7 +4,6 @@
   "description": "Privacy-preserving middleware for AI assistants - anonymize sensitive data before sending prompts to LLMs",
   "version": "0.0.1",
   "publisher": "your-publisher-name",
-  "icon": "images/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/Kevin-CNC/vs-prompt-hider.git"
