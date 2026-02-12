@@ -216,7 +216,11 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         anonymizeCommand,
         openRuleEditorCommand,
-        openWebUI
+        openWebUI,
+        showMappingsCommand,
+        toggleAnonymizationCommand,
+        clearMappingsCommand,
+        createRulesheetCommand
     );
 }
 
