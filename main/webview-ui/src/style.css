@@ -1,17 +1,15 @@
-* {
-  box-sizing: border-box;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: var(--vscode-font-family, system-ui, -apple-system, sans-serif);
+  font-size: var(--vscode-font-size, 14px);
   margin: 0;
   padding: 0;
 }
 
-body {
-  font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size);
-  color: var(--vscode-foreground);
-  background-color: var(--vscode-editor-background);
-}
-
 #app {
-  height: 100vh;
+  min-height: 100vh;
   overflow-y: auto;
 }
