@@ -109,4 +109,36 @@ export class ConfigManager {
         // 2. Check file doesn't already exist
         // 3. Create with default config structure
     }
+
+    // ---- Helpers for the webview UI ----
+
+    getRulesheetName(): string {
+        return path.basename(this.configFilePath, '.prompthider.json');
+    }
+
+    async loadFullConfig(): Promise<ProjectConfig | null> {
+        try {
+            if (!this.rulesheetExists(this.configFilePath)) { return null; }
+            const content = fs.readFileSync(this.configFilePath, 'utf-8');
+            const config = JSON.parse(content) as ProjectConfig;
+            if (!this.isActuallyWellParsed(config)) { return null; }
+            return config;
+        } catch {
+            return null;
+        }
+    }
+
+    async setEnabled(enabled: boolean): Promise<void> {
+        try {
+            if (!this.rulesheetExists(this.configFilePath)) { return; }
+            const content = fs.readFileSync(this.configFilePath, 'utf-8');
+            const config = JSON.parse(content) as ProjectConfig;
+            if (this.isActuallyWellParsed(config)) {
+                config.enabled = enabled;
+                fs.writeFileSync(this.configFilePath, JSON.stringify(config, null, 2), 'utf-8');
+            }
+        } catch (error) {
+            console.error("Error setting enabled state:", error);
+        }
+    }
 }

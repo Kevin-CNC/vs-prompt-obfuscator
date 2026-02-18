@@ -67,8 +67,6 @@ export async function activate(context: vscode.ExtensionContext) {
         }
     } else if (prmptHidFiles.length === 0) { // none -> create one
         console.log("No rule files found, creating a new one with default name.");
-
-        mainUIProvider.show(context);
         let givenName = await vscode.window.showInputBox({
             placeHolder: 'Enter your rule file name (Else press enter for default name).'
         });
@@ -155,7 +153,7 @@ export async function activate(context: vscode.ExtensionContext) {
         'prompthider.openUI',
         () => {
             vscode.window.showInformationMessage('Opening main ui...');
-            mainUIProvider.show(context);
+            mainUIProvider.show(context, configs);
         });
 
 
