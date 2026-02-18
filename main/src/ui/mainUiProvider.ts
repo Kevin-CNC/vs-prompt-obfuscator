@@ -20,7 +20,8 @@ export class mainUIProvider {
             {
                 enableScripts: true,
                 localResourceRoots: [
-                    vscode.Uri.file(path.join(context.extensionPath, 'dist', 'webview'))
+                    vscode.Uri.file(path.join(context.extensionPath, 'dist', 'webview')),
+                    vscode.Uri.file(path.join(context.extensionPath, 'node_modules', '@vscode', 'codicons', 'dist'))
                 ]
             }
         );
@@ -66,6 +67,25 @@ export class mainUIProvider {
                     break;
                 }
 
+                case 'saveSingleRule': {
+                    if (!configManager) { break; }
+                    const ruleCarried = message.rule as { id: string; pattern: string; replacement: string };
+
+                    const existingRules = (message.rules as any[]).map(r => ({
+                        id: r.id as string,
+                        type: 'custom' as const,
+                        pattern: r.pattern as string,
+                        replacement: r.replacement as string,
+                        enabled: true,
+                        description: `Custom rule: ${r.pattern} → ${r.replacement}`,
+                    }));
+                    
+                    const updatedRules = existingRules.map(r => r.id === ruleCarried.id ? { ...r, ...ruleCarried } : r);
+                    await configManager.saveProjectRules(updatedRules);
+                    panel.webview.postMessage({ command: 'rulesSaved' });
+                    break;
+                }
+
                 case 'toggleEnabled': {
                     if (!configManager) { break; }
                     await configManager.setEnabled(message.enabled as boolean);
@@ -90,6 +110,14 @@ export class mainUIProvider {
             }
 
             let html = fs.readFileSync(distPath, 'utf8');
+
+            // Get URI for codicon stylesheet
+            const codiconsUri = panel.webview.asWebviewUri(
+                vscode.Uri.file(path.join(context.extensionPath, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css'))
+            );
+
+            // Add codicon stylesheet to the head
+            html = html.replace('</head>', `<link href="${codiconsUri}" rel="stylesheet" /></head>`);
 
             // Transform asset URLs to use vscode-resource:// scheme
             const distDir = path.join(context.extensionPath, 'dist', 'webview');

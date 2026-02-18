@@ -1,29 +1,54 @@
 <template>
-  <MainMenu
-    v-if="currentView === 'menu'"
-    :rulesheet-name="rulesheetName"
-    :enabled="enabled"
-    @navigate="handleNavigate"
-    @toggle-enabled="handleToggleEnabled"
-  />
-  <RuleEditor
-    v-else-if="currentView === 'rules'"
-    :rulesheet-name="rulesheetName"
-    :rules="rules"
-    @back="currentView = 'menu'"
-    @save-rules="handleSaveRules"
-  />
+  <main class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="title-container">
+        <h1 class="title">Prompt Hider</h1>
+        <vscode-tag>{{ rulesheetName }}</vscode-tag>
+      </div>
+      <div class="actions-container">
+        <vscode-switch :checked="enabled" @change="handleToggleEnabled">
+          Anonymization Enabled
+        </vscode-switch>
+      </div>
+    </header>
+
+    <!-- Rule Editor View -->
+    <RuleEditor
+      :rules="rules"
+      :enabled="enabled"
+      @save-rules="handleSaveRules"
+      @toggle-enabled="handleToggleEnabled"
+    />
+  </main>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import MainMenu from './components/MainMenu.vue';
 import RuleEditor from './components/RuleEditor.vue';
+import {
+  provideVSCodeDesignSystem,
+  vsCodeButton,
+  vsCodeDataGrid,
+  vsCodeDataGridCell,
+  vsCodeDataGridRow,
+  vsCodeTag,
+  vsCodeTextField
+} from '@vscode/webview-ui-toolkit';
+
+// Register the VS Code Webview UI Toolkit components
+provideVSCodeDesignSystem().register(
+  vsCodeButton(),
+  vsCodeDataGrid(),
+  vsCodeDataGridCell(),
+  vsCodeDataGridRow(),
+  vsCodeTag(),
+  vsCodeTextField()
+);
 
 const vscode = acquireVsCodeApi();
 
 // ---- Reactive state ----
-const currentView = ref<'menu' | 'rules'>('menu');
 const rulesheetName = ref('Loading...');
 const enabled = ref(false);
 
@@ -34,17 +59,11 @@ interface SimpleRule {
 }
 const rules = ref<SimpleRule[]>([]);
 
-// ---- Navigation ----
-function handleNavigate(view: string) {
-  if (view === 'rules') {
-    currentView.value = 'rules';
-  }
-}
-
 // ---- Enable / Disable toggle ----
 function handleToggleEnabled() {
-  enabled.value = !enabled.value;
-  vscode.postMessage({ command: 'toggleEnabled', enabled: enabled.value });
+  const newEnabledState = !enabled.value;
+  enabled.value = newEnabledState;
+  vscode.postMessage({ command: 'toggleEnabled', enabled: newEnabledState });
 }
 
 // ---- Save rules ----
@@ -62,9 +81,6 @@ window.addEventListener('message', (event) => {
       rules.value = msg.rules ?? [];
       enabled.value = msg.enabled ?? false;
       break;
-    case 'rulesSaved':
-      // Handled by RuleEditor toast
-      break;
     case 'enabledUpdated':
       enabled.value = msg.enabled;
       break;
@@ -76,3 +92,45 @@ onMounted(() => {
   vscode.postMessage({ command: 'ready' });
 });
 </script>
+
+<style scoped>
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border);
+}
+
+.title-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--vscode-editor-foreground);
+  margin: 0;
+}
+
+.actions-container {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+vscode-switch {
+  padding-top: 4px;
+}
+</style>
