@@ -2,6 +2,7 @@ import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import App from './App.vue';
 import './style.css';
+import '@vscode/codicons/dist/codicon.css';
 
 const pinia = createPinia();
 const app = createApp(App);

@@ -1,138 +1,85 @@
 <template>
-  <div class="min-h-screen flex flex-col items-center px-4 py-8 editor-bg">
-    <!-- Title -->
-    <h1 class="text-3xl font-extrabold italic mb-6 text-gray-800 tracking-tight text-center">
-      [{{ rulesheetName }}]
-    </h1>
+  <div class="rule-editor-container">
+    <vscode-data-grid :rows-data="localRules" grid-template-columns="1fr 1fr 120px" aria-label="Anonymization Rules">
+      <vscode-data-grid-row row-type="header">
+        <vscode-data-grid-cell cell-type="columnheader" grid-column="1">Pattern (Regex)</vscode-data-grid-cell>
+        <vscode-data-grid-cell cell-type="columnheader" grid-column="2">Replacement</vscode-data-grid-cell>
+        <vscode-data-grid-cell cell-type="columnheader" grid-column="3">Actions</vscode-data-grid-cell>
+      </vscode-data-grid-row>
+      <vscode-data-grid-row v-for="(rule, index) in localRules" :key="rule.id">
+        <vscode-data-grid-cell grid-column="1">
+          <vscode-text-field
+            :value="rule.pattern"
+            @input="updateRule(index, 'pattern', $event.target.value)"
+            placeholder="e.g., API_KEY_\\w+"
+            class="w-full"
+          ></vscode-text-field>
+        </vscode-data-grid-cell>
+        <vscode-data-grid-cell grid-column="2">
+          <vscode-text-field
+            :value="rule.replacement"
+            @input="updateRule(index, 'replacement', $event.target.value)"
+            placeholder="e.g., API_KEY_{index}"
+            class="w-full"
+          ></vscode-text-field>
+        </vscode-data-grid-cell>
+        <vscode-data-grid-cell grid-column="3" class="actions-cell">
+          
+          <!-- Delete button -->
+          <vscode-button appearance="icon" @click="requestRemoveRule(index)" aria-label="Delete rule">
+            <span class="codicon codicon-trash"></span>
+          </vscode-button>
+          <!-- Delete button -->
 
-    <!-- Back button -->
-    <button
-      @click="$emit('back')"
-      class="absolute top-3 left-3 w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200
-              flex items-center justify-center text-lg text-gray-600 shadow-sm z-10
-              transition-colors cursor-pointer focus:outline-none"
-      title="Back to menu"
-    >
-      &lt;
-    </button>
 
-    <!-- Card -->
-    <div class="w-full max-w-3xl bg-white rounded-2xl shadow-lg overflow-hidden relative">
+          <!-- Save Rule button -->
+          <vscode-button appearance="icon" @click="saveSingleRule(index)" aria-label="Save rule">
+            <span class="codicon codicon-save"></span>
+          </vscode-button>
+          <!-- Save Rule button -->
+          
 
-      <!-- Table header -->
-      <div class="grid grid-cols-2 border-b border-gray-300 pt-3 pb-2 px-14">
-        <div class="text-center font-semibold text-gray-700 text-base">Pattern to censor</div>
-        <div class="text-center font-semibold text-gray-700 text-base">Output</div>
+        </vscode-data-grid-cell>
+      </vscode-data-grid-row>
+    </vscode-data-grid>
+
+    <div class="footer-actions">
+      <div class="footer-group">
+        <vscode-button appearance="primary" @click="addRule">
+          <span slot="start" class="codicon codicon-plus"></span>
+          Add Rule
+        </vscode-button>
+        <vscode-button appearance="secondary" @click="confirmRules">Save All Rules</vscode-button>
       </div>
+      <div class="footer-group">
+        <vscode-switch :checked="enabled" @change="$emit('toggleEnabled')">
+          Anonymization
+        </vscode-switch>
+        <vscode-button appearance="secondary" disabled title="This feature is under development">Export/Import Rules</vscode-button>
+      </div>
+    </div>
 
-      <!-- Rules list -->
-      <div>
-        <div
-          v-for="(rule, index) in localRules"
-          :key="rule.id"
-          class="grid grid-cols-2 border-b border-gray-100"
-          :class="index % 2 === 0 ? 'bg-white' : 'bg-gray-100'"
-        >
-          <!-- Pattern cell -->
-          <div class="relative flex items-center justify-center px-6 py-4 min-h-[56px]">
-            <!-- Edit mode -->
-            <input
-              v-if="rule.editing"
-              v-model="rule.pattern"
-              class="w-full text-center text-red-600 italic font-medium bg-transparent
-                     border-b-2 border-gray-300 focus:border-red-400 outline-none py-1 text-sm"
-              placeholder="Enter pattern..."
-              @keydown.enter="finishEdit(index)"
-            />
-            <!-- Display mode -->
-            <span v-else class="text-red-600 italic font-medium text-sm text-center break-all">
-              {{ rule.pattern }}
-            </span>
+    <div v-if="showSaved" class="save-feedback" role="status" aria-live="polite">
+      Rules saved successfully!
+    </div>
 
-            <!-- Cell action buttons -->
-            <div v-if="!rule.editing" class="absolute top-1 right-1 flex gap-1">
-              <button
-                @click="removeRule(index)"
-                class="action-btn action-btn-delete"
-                title="Delete rule"
-              >✕</button>
-              <button
-                @click="startEdit(index)"
-                class="action-btn action-btn-edit"
-                title="Edit rule"
-              >✎</button>
-            </div>
-          </div>
+    <div v-if="showSingleSaved" class="save-feedback" role="status" aria-live="polite">
+      Rule saved successfully!
+    </div>
 
-          <!-- Divider -->
-          <div class="relative flex items-center justify-center px-6 py-4 min-h-[56px] border-l border-gray-200">
-            <!-- Edit mode -->
-            <input
-              v-if="rule.editing"
-              v-model="rule.replacement"
-              class="w-full text-center text-gray-900 font-semibold bg-transparent
-                     border-b-2 border-gray-300 focus:border-blue-400 outline-none py-1 text-sm"
-              placeholder="Enter output..."
-              @keydown.enter="finishEdit(index)"
-            />
-            <!-- Display mode -->
-            <span v-else class="text-gray-900 font-semibold text-sm text-center break-all">
-              {{ rule.replacement }}
-            </span>
-
-            <!-- Cell action buttons -->
-            <div v-if="!rule.editing" class="absolute top-1 right-1 flex gap-1">
-              <button
-                @click="removeRule(index)"
-                class="action-btn action-btn-delete"
-                title="Delete rule"
-              >✕</button>
-              <button
-                @click="startEdit(index)"
-                class="action-btn action-btn-edit"
-                title="Edit rule"
-              >✎</button>
-            </div>
-          </div>
+    <!-- Deletion Confirmation Dialog -->
+    <div v-if="ruleToDelete" class="dialog-overlay">
+      <div class="dialog-content" role="alertdialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+        <h2 id="dialog-title" class="dialog-title">Delete Pattern</h2>
+        <p id="dialog-description" class="dialog-description">
+          Are you sure you want to delete the pattern "{{ ruleToDelete.rule.pattern }}"? This action cannot be undone.
+        </p>
+        <div class="dialog-actions">
+          <vscode-button appearance="secondary" @click="cancelRemoveRule">Cancel</vscode-button>
+          <vscode-button appearance="primary" @click="confirmRemoveRule" class="delete-button">Delete</vscode-button>
         </div>
       </div>
-
-      <!-- Add button row -->
-      <div class="flex justify-center py-4 bg-gray-50 border-t border-gray-100">
-        <button
-          @click="addRule"
-          class="w-10 h-10 rounded-full bg-white hover:bg-green-50
-                 border-2 border-gray-300 hover:border-green-400
-                 flex items-center justify-center text-2xl text-gray-500 hover:text-green-600
-                 shadow-sm transition-all cursor-pointer focus:outline-none"
-          title="Add new rule"
-        >
-          +
-        </button>
-      </div>
     </div>
-
-    <!-- Confirm button -->
-    <div class="flex justify-end w-full max-w-3xl mt-5">
-      <button
-        @click="confirmRules"
-        class="px-6 py-3 rounded-xl bg-white hover:bg-green-50 text-gray-700 font-semibold
-               shadow-md border border-gray-200 hover:border-green-400
-               transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-green-300"
-      >
-        Confirm?
-      </button>
-    </div>
-
-    <!-- Save feedback -->
-    <transition name="fade">
-      <div
-        v-if="showSaved"
-        class="fixed bottom-6 right-6 bg-green-600 text-white px-5 py-3 rounded-lg shadow-lg text-sm font-medium"
-      >
-        Rules saved successfully!
-      </div>
-    </transition>
   </div>
 </template>
 
@@ -143,32 +90,28 @@ export interface RuleRow {
   id: string;
   pattern: string;
   replacement: string;
-  editing: boolean;
 }
 
 const props = defineProps<{
-  rulesheetName: string;
   rules: { id: string; pattern: string; replacement: string }[];
+  enabled: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: 'back'): void;
   (e: 'saveRules', rules: { id: string; pattern: string; replacement: string }[]): void;
+  (e: 'saveSingleRule', rule: { id: string; pattern: string; replacement: string }): void;
+  (e: 'toggleEnabled'): void;
 }>();
 
 const localRules = ref<RuleRow[]>([]);
 const showSaved = ref(false);
+const showSingleSaved = ref(false);
+const ruleToDelete = ref<{ rule: RuleRow; index: number } | null>(null);
 
-// Sync props → local state when rules change
 watch(
   () => props.rules,
   (newRules) => {
-    localRules.value = newRules.map((r) => ({
-      id: r.id,
-      pattern: r.pattern,
-      replacement: r.replacement,
-      editing: false,
-    }));
+    localRules.value = JSON.parse(JSON.stringify(newRules || []));
   },
   { immediate: true, deep: true }
 );
@@ -182,43 +125,73 @@ function addRule() {
     id: generateId(),
     pattern: '',
     replacement: '',
-    editing: true,
   });
 }
 
-function removeRule(index: number) {
-  localRules.value.splice(index, 1);
+function requestRemoveRule(index: number) {
+  const rule = localRules.value[index];
+  if (rule) {
+    ruleToDelete.value = { rule, index };
+  }
 }
 
-function startEdit(index: number) {
-  localRules.value[index].editing = true;
+function confirmRemoveRule() {
+  if (ruleToDelete.value !== null) {
+
+    if (ruleToDelete.value.rule.pattern.trim() === '' && ruleToDelete.value.rule.replacement.trim() === '') {
+      // If the rule is empty, just remove it without confirmation
+      localRules.value.splice(ruleToDelete.value.index, 1);
+      ruleToDelete.value = null;
+      
+      return;
+    } 
+
+    localRules.value.splice(ruleToDelete.value.index, 1);
+    ruleToDelete.value = null;
+    //confirmRules();
+  }
 }
 
-function finishEdit(index: number) {
-  localRules.value[index].editing = false;
+function cancelRemoveRule() {
+  ruleToDelete.value = null;
+}
+
+function updateRule(index: number, field: 'pattern' | 'replacement', value: string) {
+  if (localRules.value[index]) {
+    localRules.value[index][field] = value;
+  }
+}
+
+function saveSingleRule(index: number) {
+  const ruleToSave = localRules.value[index];
+
+  if (ruleToSave.pattern.trim() !== '' || ruleToSave.replacement.trim() !== ''){
+    emit('saveSingleRule', {
+      id: ruleToSave.id,
+      pattern: ruleToSave.pattern.trim(),
+      replacement: ruleToSave.replacement.trim(),
+    });
+
+    showSingleSaved.value = true;
+    setTimeout(() => {
+      showSingleSaved.value = false;
+    }, 2500);
+  }
 }
 
 function confirmRules() {
-  // Filter out incomplete rows (both fields must be filled)
   const validRules = localRules.value
-    .filter((r) => r.pattern.trim() !== '' && r.replacement.trim() !== '')
+    .filter((r) => r.pattern.trim() !== '' || r.replacement.trim() !== '')
     .map((r) => ({
       id: r.id,
       pattern: r.pattern.trim(),
       replacement: r.replacement.trim(),
     }));
 
-  // Finish editing on all rows
-  localRules.value.forEach((r) => (r.editing = false));
-
-  // Remove incomplete rows from local display
-  localRules.value = localRules.value.filter(
-    (r) => r.pattern.trim() !== '' && r.replacement.trim() !== ''
-  );
+  localRules.value = validRules;
 
   emit('saveRules', validRules);
 
-  // Show success toast
   showSaved.value = true;
   setTimeout(() => {
     showSaved.value = false;
@@ -227,29 +200,105 @@ function confirmRules() {
 </script>
 
 <style scoped>
-.editor-bg {
-  background: #202020;
+.rule-editor-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 16px;
+  padding: 0 24px 24px 24px;
+  box-sizing: border-box;
 }
 
-.action-btn {
-  @apply w-6 h-6 rounded-full text-xs flex items-center justify-center shadow-sm
-         cursor-pointer transition-colors focus:outline-none;
+vscode-data-grid {
+  flex-grow: 1;
 }
 
-.action-btn-delete {
-  @apply bg-red-100 hover:bg-red-200 text-red-500;
+.actions-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.action-btn-edit {
-  @apply bg-gray-200 hover:bg-gray-300 text-gray-600;
+.w-full {
+  width: 100%;
 }
 
-.fade-enter-active,
-.fade-leave-active {
+.footer-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  border-top: 1px solid var(--vscode-editorGroup-border);
+  background-color: var(--vscode-editor-background);
+  box-shadow: 0 -4px 12px -4px var(--vscode-scrollbar-shadow);
+}
+
+.footer-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.save-feedback {
+  position: fixed;
+  bottom: 80px; /* Adjusted for footer */
+  right: 24px;
+  background-color: var(--vscode-statusBar-background);
+  color: var(--vscode-statusBar-foreground);
+  padding: 8px 16px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   transition: opacity 0.3s ease;
+  z-index: 100;
 }
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+
+/* Dialog Styles */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.dialog-content {
+  background-color: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  padding: 24px;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  width: 90%;
+  max-width: 400px;
+  border: 1px solid var(--vscode-editorGroup-border);
+}
+
+.dialog-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+}
+
+.dialog-description {
+  margin: 0 0 24px 0;
+  color: var(--vscode-descriptionForeground);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.delete-button::part(control) {
+  background-color: var(--vscode-errorForeground);
+  color: var(--vscode-button-foreground);
 }
 </style>
