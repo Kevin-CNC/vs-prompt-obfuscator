@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ConfigManager } from '../utils/ConfigManager';
+import { config } from 'process';
 
 export class mainUIProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
@@ -71,17 +72,33 @@ export class mainUIProvider {
                     if (!configManager) { break; }
                     const ruleCarried = message.rule as { id: string; pattern: string; replacement: string };
 
-                    const existingRules = (message.rules as any[]).map(r => ({
-                        id: r.id as string,
-                        type: 'custom' as const,
-                        pattern: r.pattern as string,
-                        replacement: r.replacement as string,
-                        enabled: true,
-                        description: `Custom rule: ${r.pattern} → ${r.replacement}`,
-                    }));
+                    // Load current rules from disk
+                    const loadedProject = await configManager.loadFullConfig();
+                    const currentRules = Array.isArray(loadedProject?.rules) ? loadedProject.rules : [];
+                    const ruleExistsIndx = currentRules.findIndex(r => r.id === ruleCarried.id);
                     
-                    const updatedRules = existingRules.map(r => r.id === ruleCarried.id ? { ...r, ...ruleCarried } : r);
-                    await configManager.saveProjectRules(updatedRules);
+                    // Create a normalized rule object (matching the structure ConfigManager expects)
+                    const normalizedRule = {
+                        id: ruleCarried.id,
+                        type: 'custom' as const,
+                        pattern: ruleCarried.pattern,  // ConfigManager will convert this to RegExp internally
+                        replacement: ruleCarried.replacement,
+                        enabled: true,
+                        description: `Custom rule: ${ruleCarried.pattern} → ${ruleCarried.replacement}`,
+                    };
+
+                    if (ruleExistsIndx !== -1) {
+                        // Update the single rule if it already exists
+                        currentRules[ruleExistsIndx] = normalizedRule;
+                        console.log("Updating existing rule:", normalizedRule);
+                    } else {
+                        // OR Add it to the file
+                        currentRules.push(normalizedRule);
+                        console.log("Adding new rule:", normalizedRule);
+                    }
+
+                    // Save to disk (ConfigManager will handle pattern normalization)
+                    await configManager.saveProjectRules(currentRules);
                     panel.webview.postMessage({ command: 'rulesSaved' });
                     break;
                 }
