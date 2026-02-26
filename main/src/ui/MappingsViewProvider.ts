@@ -2,9 +2,9 @@ import * as vscode from 'vscode';
 import { TokenManager } from '../anonymizer/TokenManager';
 
 export class MappingsViewProvider implements vscode.TreeDataProvider<MappingItem> {
-    private _onDidChangeTreeData: vscode.EventEmitter<MappingItem | undefined | null | void> = 
-        new vscode.EventEmitter<MappingItem | undefined | null | void>();
-    readonly onDidChangeTreeData: vscode.Event<MappingItem | undefined | null | void> = 
+    private _onDidChangeTreeData: vscode.EventEmitter<MappingItem | undefined | null> = 
+        new vscode.EventEmitter<MappingItem | undefined | null>();
+    readonly onDidChangeTreeData: vscode.Event<MappingItem | undefined | null> = 
         this._onDidChangeTreeData.event;
 
     constructor(private tokenManager: TokenManager) {}

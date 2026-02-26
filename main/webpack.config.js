@@ -3,6 +3,7 @@
 'use strict';
 
 const path = require('path');
+const CopyPlugin = require('copy-webpack-plugin');
 
 /**@type {import('webpack').Configuration}*/
 const config = {
@@ -38,6 +39,16 @@ const config = {
   infrastructureLogging: {
     level: "log", // enables logging required for problem matchers
   },
-};
+  plugins: [
+    new CopyPlugin({
+        patterns: [
+            {
+                from: path.resolve(__dirname, 'webview-ui', 'dist'),
+                to: path.resolve(__dirname, 'dist', 'webview'),
+                noErrorOnMissing: true
+            }
+        ]
+    })
+]};
 
 module.exports = config;

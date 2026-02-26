@@ -1,6 +1,14 @@
 import * as vscode from 'vscode';
 import { ConfigManager } from '../utils/ConfigManager';
-import { getNonce } from '../utils/getNonce';
+
+function randomStringGen(size: number): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = '';
+    for (let i = 0; i < size; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+}
 
 export class RuleEditorProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'prompthider.rulesView';
@@ -33,7 +41,7 @@ export class RuleEditorProvider implements vscode.WebviewViewProvider {
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
-        const nonce = getNonce();
+        const nonce = randomStringGen(12);
 
         // TODO: Replace with built Vue.js app from webview-ui/dist
         return `<!DOCTYPE html>

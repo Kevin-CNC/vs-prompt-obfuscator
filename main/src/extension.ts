@@ -4,11 +4,10 @@ import { AnonymizationEngine } from './anonymizer/AnonymizationEngine';
 import { TokenManager } from './anonymizer/TokenManager';
 import { ConfigManager } from './utils/ConfigManager';
 import { window } from 'vscode';
+import { mainUIProvider } from './ui/mainUiProvider';
+import { RuleEditorProvider } from './ui/RuleEditorProvider';
+import { MappingsViewProvider } from './ui/MappingsViewProvider';
 import * as fs from 'fs';
-
-// TODO: Import UI providers when ready
-// import { RuleEditorProvider } from './ui/RuleEditorProvider';
-// import { MappingsViewProvider } from './ui/MappingsViewProvider';
 
 function updateDevFiles(rulesheetRelativePath: string) {
     // for now only target .gitignore and .copilotignore
@@ -68,8 +67,6 @@ export async function activate(context: vscode.ExtensionContext) {
         }
     } else if (prmptHidFiles.length === 0) { // none -> create one
         console.log("No rule files found, creating a new one with default name.");
-
-        
         let givenName = await vscode.window.showInputBox({
             placeHolder: 'Enter your rule file name (Else press enter for default name).'
         });
@@ -81,18 +78,27 @@ export async function activate(context: vscode.ExtensionContext) {
         const workspaceFldrs = vscode.workspace.workspaceFolders;
         if (workspaceFldrs && workspaceFldrs.length > 0) {
             const workspaceUri = workspaceFldrs[0].uri;
-            const vscodeFolder = path.join(workspaceUri.fsPath, '.vscode');
+            const promptHiderFolder = path.join(workspaceUri.fsPath, '.prompthider');
 
-            // Ensure .vscode folder exists
-            if (!fs.existsSync(vscodeFolder)) {
-                fs.mkdirSync(vscodeFolder, { recursive: true });
+            // Ensure .prompthider folder exists
+            if (!fs.existsSync(promptHiderFolder)) {
+                fs.mkdirSync(promptHiderFolder, { recursive: true });
             }
 
-            const newFPath = path.join(vscodeFolder, `${givenName}.prompthider.json`);
+            const newFPath = path.join(promptHiderFolder, `${givenName}.prompthider.json`);
             selectedFile = vscode.Uri.file(newFPath);
 
-            // actually creating the file
-            const content = Buffer.from('{}', 'utf8');
+            // actually creating the file & adding default data
+            const defaultData = {
+                version: "0",
+                enabled: false,
+                rules: [],
+                tokenConsistency: false,
+                autoAnonymize: false,
+                showPreview: true
+            };
+            
+            const content = Buffer.from(JSON.stringify(defaultData, null, 4), 'utf8');
             await vscode.workspace.fs.writeFile(selectedFile, content);
 
             vscode.window.showInformationMessage(`Created rule file: ${path.basename(selectedFile.fsPath)} !`);
@@ -109,20 +115,29 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
 
-        
-
-
     const tokenManager = new TokenManager(context);
     const configs = new ConfigManager(selectedFile.fsPath);
     const anonymizationEngine = new AnonymizationEngine(tokenManager, configs);
 
-    // TODO: Register UI providers (webviews, tree views, etc.)
+    // Register UI providers
+    const mappingsViewProvider = new MappingsViewProvider(tokenManager);
+    const ruleEditorProvider = new RuleEditorProvider(
+        vscode.Uri.file(context.extensionPath),
+        configs
+    );
+
+    // Register tree views
+    vscode.window.registerTreeDataProvider('prompthider.mappingsView', mappingsViewProvider);
+    vscode.window.registerWebviewViewProvider(RuleEditorProvider.viewType, ruleEditorProvider);
 
     // TODO: Register commands
 
     // Anonymize command toggle;
     // Informs the user if their prompts will be anonymized or not.
     // Switch toggle functionality.
+
+
+    // COMMANDS HERE FOR THE EXTENSION
     let anonSwitch = false;
     const anonymizeCommand = vscode.commands.registerCommand(
         'prompthider.anonymize',
@@ -134,11 +149,59 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
 
+    const openWebUI = vscode.commands.registerCommand(
+        'prompthider.openUI',
+        () => {
+            vscode.window.showInformationMessage('Opening main ui...');
+            mainUIProvider.show(context, configs);
+        });
+
+
     const openRuleEditorCommand = vscode.commands.registerCommand(
         'prompthider.openRuleEditor',
         () => {
-            // TODO: Open rule editor webview
             vscode.window.showInformationMessage('Opening rule editor...');
+            // The rule editor is already registered as a webview view
+            // Users can access it from the sidebar
+        }
+    );
+
+    const showMappingsCommand = vscode.commands.registerCommand(
+        'prompthider.showMappings',
+        () => {
+            mappingsViewProvider.refresh();
+            vscode.window.showInformationMessage('Showing token mappings...');
+        }
+    );
+
+    const toggleAnonymizationCommand = vscode.commands.registerCommand(
+        'prompthider.toggleAnonymization',
+        () => {
+            anonSwitch = !anonSwitch;
+            vscode.window.showInformationMessage(`Auto-anonymization: ${anonSwitch ? 'enabled' : 'disabled'}`);
+        }
+    );
+
+    const clearMappingsCommand = vscode.commands.registerCommand(
+        'prompthider.clearMappings',
+        async () => {
+            const answer = await vscode.window.showWarningMessage(
+                'Are you sure you want to clear all token mappings?',
+                'Yes', 'No'
+            );
+            if (answer === 'Yes') {
+                tokenManager.clearMappings();
+                mappingsViewProvider.refresh();
+                vscode.window.showInformationMessage('Token mappings cleared');
+            }
+        }
+    );
+
+    const createRulesheetCommand = vscode.commands.registerCommand(
+        'prompthider.activate',
+        async () => {
+            vscode.window.showInformationMessage('Creating a new rulesheet...');
+            // TODO: Implement rulesheet creation logic
         }
     );
 
@@ -150,7 +213,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         anonymizeCommand,
-        openRuleEditorCommand
+        openRuleEditorCommand,
+        openWebUI,
+        showMappingsCommand,
+        toggleAnonymizationCommand,
+        clearMappingsCommand,
+        createRulesheetCommand
     );
 }
 

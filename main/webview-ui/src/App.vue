@@ -1,56 +1,149 @@
 <template>
-  <div class="app">
-    <h2>Prompt Hider - Rule Editor</h2>
-    <p class="description">
-      TODO: Build the rule editor UI
-    </p>
+  <main class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="title-container">
+        <h1 class="title">Prompt Hider</h1>
+        <vscode-tag>{{ rulesheetName }}</vscode-tag>
+      </div>
+      <div class="actions-container">
+        <vscode-switch :checked="enabled" @change="handleToggleEnabled">
+          Anonymization Enabled
+        </vscode-switch>
+      </div>
+    </header>
 
-    <div class="actions">
-      <button @click="handleAction">Test Button</button>
-    </div>
-
-    <!-- TODO: Add components for:
-      - Rule list display
-      - Rule creation form
-      - Rule editing
-      - Enable/disable toggles
-    -->
-  </div>
+    <!-- Rule Editor View -->
+    <RuleEditor
+      :rules="rules"
+      :enabled="enabled"
+      @save-rules="handleSaveRules"
+      @save-single-rule="handleSaveSingleRule"
+      @toggle-enabled="handleToggleEnabled"
+    />
+  </main>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
+import RuleEditor from './components/RuleEditor.vue';
+import {
+  provideVSCodeDesignSystem,
+  vsCodeButton,
+  vsCodeDataGrid,
+  vsCodeDataGridCell,
+  vsCodeDataGridRow,
+  vsCodeTag,
+  vsCodeTextField
+} from '@vscode/webview-ui-toolkit';
 
-// TODO: Define interfaces for rules
+// Register the VS Code Webview UI Toolkit components
+provideVSCodeDesignSystem().register(
+  vsCodeButton(),
+  vsCodeDataGrid(),
+  vsCodeDataGridCell(),
+  vsCodeDataGridRow(),
+  vsCodeTag(),
+  vsCodeTextField()
+);
 
-// TODO: Get VS Code API
-// declare const acquireVsCodeApi: () => any;
-// const vscode = acquireVsCodeApi();
+const vscode = acquireVsCodeApi();
 
-function handleAction() {
-  // TODO: Implement communication with extension
-  console.log('Button clicked');
+// ---- Reactive state ----
+const rulesheetName = ref('Loading...');
+const enabled = ref(false);
+
+interface SimpleRule {
+  id: string;
+  pattern: string;
+  replacement: string;
+}
+const rules = ref<SimpleRule[]>([]);
+
+// ---- Enable / Disable toggle ----
+function handleToggleEnabled() {
+  const newEnabledState = !enabled.value;
+  enabled.value = newEnabledState;
+  vscode.postMessage({ command: 'toggleEnabled', enabled: newEnabledState });
 }
 
-// TODO: Listen for messages from the extension
+// ---- Save rules ----
+function handleSaveRules(newRules: SimpleRule[]) {
+  rules.value = newRules;
+  vscode.postMessage({ command: 'saveRules', rules: newRules });
+}
+
+// ---- Save single rule ----
+function handleSaveSingleRule(rule: SimpleRule) {
+  // Update the rule in local state
+  const idx = rules.value.findIndex(r => r.id === rule.id);
+  if (idx !== -1) {
+    rules.value[idx] = rule;
+  } else {
+    rules.value.push(rule);
+  }
+  vscode.postMessage({ command: 'saveSingleRule', rule });
+}
+
+// ---- Listen for messages from the extension host ----
+window.addEventListener('message', (event) => {
+  const msg = event.data;
+  switch (msg.command) {
+    case 'init':
+      rulesheetName.value = msg.rulesheetName ?? 'Unknown';
+      rules.value = msg.rules ?? [];
+      enabled.value = msg.enabled ?? false;
+      break;
+    case 'enabledUpdated':
+      enabled.value = msg.enabled;
+      break;
+  }
+});
+
+// ---- Tell the extension we're ready ----
+onMounted(() => {
+  vscode.postMessage({ command: 'ready' });
+});
 </script>
 
 <style scoped>
-.app {
-  padding: 20px;
-  font-family: var(--vscode-font-family);
-  color: var(--vscode-foreground);
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  height: 100vh;
+  box-sizing: border-box;
 }
 
-button {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
-  border: none;
-  padding: 8px 16px;
-  cursor: pointer;
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border);
 }
 
-button:hover {
-  background: var(--vscode-button-hoverBackground);
+.title-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--vscode-editor-foreground);
+  margin: 0;
+}
+
+.actions-container {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+vscode-switch {
+  padding-top: 4px;
 }
 </style>
