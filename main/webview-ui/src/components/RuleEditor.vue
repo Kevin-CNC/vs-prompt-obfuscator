@@ -100,6 +100,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'saveRules', rules: { id: string; pattern: string; replacement: string }[]): void;
   (e: 'saveSingleRule', rule: { id: string; pattern: string; replacement: string }): void;
+  (e: 'removeRule', ruleId: string): void;
   (e: 'toggleEnabled'): void;
 }>();
 
