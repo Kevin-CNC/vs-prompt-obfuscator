@@ -18,6 +18,7 @@
       :rules="rules"
       :enabled="enabled"
       @save-rules="handleSaveRules"
+      @save-single-rule="handleSaveSingleRule"
       @toggle-enabled="handleToggleEnabled"
     />
   </main>
@@ -70,6 +71,18 @@ function handleToggleEnabled() {
 function handleSaveRules(newRules: SimpleRule[]) {
   rules.value = newRules;
   vscode.postMessage({ command: 'saveRules', rules: newRules });
+}
+
+// ---- Save single rule ----
+function handleSaveSingleRule(rule: SimpleRule) {
+  // Update the rule in local state
+  const idx = rules.value.findIndex(r => r.id === rule.id);
+  if (idx !== -1) {
+    rules.value[idx] = rule;
+  } else {
+    rules.value.push(rule);
+  }
+  vscode.postMessage({ command: 'saveSingleRule', rule });
 }
 
 // ---- Listen for messages from the extension host ----
