@@ -100,7 +100,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'saveRules', rules: { id: string; pattern: string; replacement: string }[]): void;
   (e: 'saveSingleRule', rule: { id: string; pattern: string; replacement: string }): void;
-  (e: 'removeRule', ruleId: string): void;
+  (e: 'deleteRule', ruleId: string): void;
   (e: 'toggleEnabled'): void;
 }>();
 
@@ -139,17 +139,12 @@ function requestRemoveRule(index: number) {
 function confirmRemoveRule() {
   if (ruleToDelete.value !== null) {
 
-    if (ruleToDelete.value.rule.pattern.trim() === '' && ruleToDelete.value.rule.replacement.trim() === '') {
-      // If the rule is empty, just remove it without confirmation
-      localRules.value.splice(ruleToDelete.value.index, 1);
-      ruleToDelete.value = null;
-      
-      return;
-    } 
+    const ruleToDeleteID = ruleToDelete.value.rule.id;
 
     localRules.value.splice(ruleToDelete.value.index, 1);
     ruleToDelete.value = null;
-    //confirmRules();
+    
+    emit('deleteRule', ruleToDeleteID);
   }
 }
 
