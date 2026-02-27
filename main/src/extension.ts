@@ -115,6 +115,19 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
 
+    // Create the chat participant
+    const chatParticipant = vscode.chat.createChatParticipant('prompthider', async (rqst, context, stream, token) => {
+        // The user's prompt to be obfuscated
+        const userPrompt = rqst.prompt;
+        
+        console.log('Intercepted prompt:', userPrompt); // just echo it for now!
+
+         stream.markdown(`Intercepted: ${userPrompt}`);
+    });
+    
+    context.subscriptions.push(chatParticipant);
+
+
     const tokenManager = new TokenManager(context);
     const configs = new ConfigManager(selectedFile.fsPath);
     const anonymizationEngine = new AnonymizationEngine(tokenManager, configs);
