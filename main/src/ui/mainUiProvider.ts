@@ -103,6 +103,22 @@ export class mainUIProvider {
                     break;
                 }
 
+
+                case 'deleteRule': {
+                    if (!configManager) { break; }
+                    const ruleIdToDelete = message.id as string;
+
+                    // Load & Filter out current rules from disk
+                    const loadedProject = await configManager.loadFullConfig();
+                    const currentRules = Array.isArray(loadedProject?.rules) ? loadedProject.rules : [];
+                    const updatedRules = currentRules.filter(r => r.id !== ruleIdToDelete);
+                    
+                    // Save the updated rules
+                    await configManager.saveProjectRules(updatedRules);
+                    panel.webview.postMessage({ command: 'ruleDeleted' });
+                    break;
+                }
+
                 case 'toggleEnabled': {
                     if (!configManager) { break; }
                     await configManager.setEnabled(message.enabled as boolean);

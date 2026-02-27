@@ -19,6 +19,7 @@
       :enabled="enabled"
       @save-rules="handleSaveRules"
       @save-single-rule="handleSaveSingleRule"
+      @delete-rule="handleDeleteRule"
       @toggle-enabled="handleToggleEnabled"
     />
   </main>
@@ -83,6 +84,14 @@ function handleSaveSingleRule(rule: SimpleRule) {
     rules.value.push(rule);
   }
   vscode.postMessage({ command: 'saveSingleRule', rule });
+}
+
+// ---- Delete single rule ----
+function handleDeleteRule(ruleId: string) {
+  // Remove from local state
+  rules.value = rules.value.filter(r => r.id !== ruleId);
+  // Send to extension backend
+  vscode.postMessage({ command: 'deleteRule', id: ruleId });
 }
 
 // ---- Listen for messages from the extension host ----
