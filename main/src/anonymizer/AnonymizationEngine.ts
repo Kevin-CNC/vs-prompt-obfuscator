@@ -25,18 +25,15 @@ export class AnonymizationEngine {
     }
 
     private initializePatterns() {
-        // Get rules from config
+        // Get rules from config (reload fresh each time)
         const rules = this.configManager.getRules();
-        
-        const patterns = rules.map(rule => ({
-            pattern: rule.pattern,
-            replacement: rule.replacement
-        }));
-
-        this.patternMatcher.build(patterns);
+        this.patternMatcher.build(rules);
     }
 
     async anonymize(text: string): Promise<AnonymizationResult> {
+        // Reload patterns fresh so any rule changes are picked up
+        this.initializePatterns();
+
         // Find all pattern matches
         const matches = this.patternMatcher.findMatches(text);
         const mappings = new Map<string, string>();
