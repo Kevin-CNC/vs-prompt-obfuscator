@@ -52,7 +52,9 @@ export class TokenManager {
             case 'path':
                 return `/PATH_${index}`;
             default:
-                return `${type.toUpperCase()}_${index}`;
+                // Custom replacement labels are used as-is (user already named the token)
+                // Only append index if there are multiple distinct values under the same label
+                return index > 1 ? `${type.toUpperCase()}_${index}` : `${type.toUpperCase()}`;
         }
     }
 
