@@ -13,13 +13,8 @@ interface ExecutionResult {
 }
 
 export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
-    /** Dedicated terminal for user-visible mirroring; recreated on close. */
     private terminal: vscode.Terminal | undefined;
-
-    /** Maximum time (ms) to wait for a command before aborting. */
     private static readonly TIMEOUT_MS = 30_000;
-
-    /** Maximum stdout+stderr buffer (bytes). */
     private static readonly MAX_BUFFER = 512 * 1024;
 
     constructor(private readonly tokenManager: TokenManager) {}
@@ -36,16 +31,13 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
             ]);
         }
 
-        // 1. De-anonymize: resolve tokens to real values client-side
         const realCommand = this.deAnonymize(rawCommand);
         console.log('[CommandExecutor] Executing (de-anonymized):', realCommand);
 
-        // 2. Mirror to terminal so the user can see what ran
         this.ensureTerminal();
-        this.terminal!.show(true); // preserves chat panel focus
+        this.terminal!.show(true);
         this.terminal!.sendText(realCommand, true);
 
-        // 3. Capture output via child_process
         let result: ExecutionResult;
         try {
             result = await this.capture(realCommand, cancellationToken);
@@ -56,7 +48,6 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
             ]);
         }
 
-        // 4. Re-anonymize stdout/stderr — real values must never reach the model
         const safeStdout = this.reAnonymize(result.stdout);
         const safeStderr = this.reAnonymize(result.stderr);
 
@@ -71,10 +62,6 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
         ]);
     }
 
-    // ---------------------------------------------------------------------------
-    // Private helpers
-    // ---------------------------------------------------------------------------
-
     private ensureTerminal(): void {
         if (!this.terminal || this.terminal.exitStatus !== undefined) {
             this.terminal = vscode.window.createTerminal('PromptHider');
@@ -82,16 +69,33 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
     }
 
     /**
-     * Spawn a child process, capture its stdout/stderr, and resolve when done.
-     * Respects VS Code's CancellationToken — kills the process on cancellation.
+     * Prepare a command for non-interactive execution.
+     * SSH commands get `-T -o BatchMode=yes` so they fail fast on
+     * host-key / password prompts instead of hanging without a PTY.
      */
+    private prepareForCapture(command: string): string {
+        const trimmed = command.trimStart();
+
+        // Match `ssh` at the start, optionally preceded by env vars (VAR=val)
+        if (/^(?:\S+=\S+\s+)*ssh\s/i.test(trimmed)) {
+            return trimmed.replace(
+                /^((?:\S+=\S+\s+)*ssh)\s/i,
+                '$1 -T -o BatchMode=yes '
+            );
+        }
+
+        return command;
+    }
+
     private capture(
         command: string,
         cancellationToken: vscode.CancellationToken
     ): Promise<ExecutionResult> {
+        const prepared = this.prepareForCapture(command);
+
         return new Promise((resolve, reject) => {
             const proc = cp.exec(
-                command,
+                prepared,
                 { timeout: CommandExecutor.TIMEOUT_MS, maxBuffer: CommandExecutor.MAX_BUFFER },
                 (error, stdout, stderr) => {
                     resolve({
@@ -102,7 +106,8 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
                 }
             );
 
-            // Honour cancellation (e.g. user stops the chat participant)
+            proc.stdin?.end();
+
             const cancelDisposable = cancellationToken.onCancellationRequested(() => {
                 proc.kill();
                 cancelDisposable.dispose();
@@ -116,11 +121,7 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
         });
     }
 
-    /**
-     * Replace all anonymized tokens in `text` with their real originals.
-     * Tokens are sorted longest-first to prevent prefix collisions
-     * (e.g. IP_10 must be replaced before IP_1).
-     */
+    /** Replace anonymized tokens with real values (longest-first). */
     deAnonymize(text: string): string {
         const reverse = this.tokenManager.getReverseMappings();
         const sorted = [...reverse.keys()].sort((a, b) => b.length - a.length);
@@ -133,16 +134,11 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
         return result;
     }
 
-    /**
-     * Replace all real values in `text` with their anonymized tokens.
-     * Applied to command output before it is returned to the model,
-     * ensuring real values never leave the extension host.
-     * Originals are sorted longest-first for the same prefix-collision reason.
-     */
+    /** Replace real values with tokens in command output before returning to model. */
     private reAnonymize(text: string): string {
         if (!text) { return text; }
 
-        const forward = this.tokenManager.getAllMappings(); // original → token
+        const forward = this.tokenManager.getAllMappings();
         const sorted = [...forward.keys()].sort((a, b) => b.length - a.length);
 
         let result = text;
