@@ -7,6 +7,7 @@ import { window } from 'vscode';
 import { mainUIProvider } from './ui/mainUiProvider';
 import { RuleEditorProvider } from './ui/RuleEditorProvider';
 import { MappingsViewProvider } from './ui/MappingsViewProvider';
+import { CommandExecutor } from './tools/CommandExecutor';
 import * as fs from 'fs';
 
 function updateDevFiles(rulesheetRelativePath: string) {
@@ -118,6 +119,22 @@ export async function activate(context: vscode.ExtensionContext) {
     const tokenManager = new TokenManager(context);
     const configs = new ConfigManager(selectedFile.fsPath);
     const anonymizationEngine = new AnonymizationEngine(tokenManager, configs);
+    const commandExecutor = new CommandExecutor(tokenManager);
+
+    // Register the execute_command tool so the LM can invoke it
+    const toolDisposable = vscode.lm.registerTool('prompthider_execute_command', commandExecutor);
+    context.subscriptions.push(toolDisposable);
+
+    // Build the LanguageModelChatTool descriptor from the registered tool metadata
+    function getToolDefinitions(): vscode.LanguageModelChatTool[] {
+        return vscode.lm.tools
+            .filter(t => t.name === 'prompthider_execute_command')
+            .map(t => ({
+                name: t.name,
+                description: t.description,
+                inputSchema: t.inputSchema ?? {}
+            }));
+    }
 
     // Create the chat participant
     const chatParticipant = vscode.chat.createChatParticipant('prompthider', async (request, chatContext, stream, token) => {
@@ -158,13 +175,66 @@ export async function activate(context: vscode.ExtensionContext) {
         // Append the current (anonymized) user message
         messages.push(vscode.LanguageModelChatMessage.User(result.anonymized));
 
-        // Send to the model the user already has selected in the chat panel
-        try {
-            const modelResponse = await request.model.sendRequest(messages, {}, token);
+        const toolDefs = getToolDefinitions();
 
-            // Stream the model's response back to the chat view
-            for await (const chunk of modelResponse.text) {
-                stream.markdown(chunk);
+        // Agentic tool-calling loop:
+        // The model may respond with tool call parts instead of (or alongside) text.
+        // We execute each requested tool client-side and feed results back until the
+        // model produces a final text-only response.
+        try {
+            let continueLoop = true;
+            while (continueLoop) {
+                continueLoop = false;
+
+                const modelResponse = await request.model.sendRequest(
+                    messages,
+                    { tools: toolDefs },
+                    token
+                );
+
+                // Collect parts so we can build the assistant history entry
+                const assistantParts: (vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart)[] = [];
+
+                for await (const part of modelResponse.stream) {
+                    if (part instanceof vscode.LanguageModelTextPart) {
+                        stream.markdown(part.value);
+                        assistantParts.push(part);
+                    } else if (part instanceof vscode.LanguageModelToolCallPart) {
+                        // Model wants to execute a command — do not stream; handle below
+                        assistantParts.push(part);
+                        continueLoop = true;
+                    }
+                }
+
+                if (continueLoop && assistantParts.length > 0) {
+                    // Record the assistant's turn (with tool call parts) in message history
+                    messages.push(vscode.LanguageModelChatMessage.Assistant(assistantParts));
+
+                    // Invoke each requested tool and accumulate results
+                    const toolResultParts: vscode.LanguageModelToolResultPart[] = [];
+
+                    for (const part of assistantParts) {
+                        if (part instanceof vscode.LanguageModelToolCallPart) {
+                            console.log(`[PromptHider] Tool call: ${part.name}`, part.input);
+
+                            const toolResult = await vscode.lm.invokeTool(
+                                part.name,
+                                {
+                                    input: part.input,
+                                    toolInvocationToken: request.toolInvocationToken
+                                },
+                                token
+                            );
+
+                            toolResultParts.push(
+                                new vscode.LanguageModelToolResultPart(part.callId, toolResult.content)
+                            );
+                        }
+                    }
+
+                    // Append tool results as a User turn so the model can continue
+                    messages.push(vscode.LanguageModelChatMessage.User(toolResultParts));
+                }
             }
         } catch (err) {
             if (err instanceof vscode.LanguageModelError) {
