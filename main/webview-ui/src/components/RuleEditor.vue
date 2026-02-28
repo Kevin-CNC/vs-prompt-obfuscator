@@ -6,7 +6,11 @@
         <vscode-data-grid-cell cell-type="columnheader" grid-column="2">Replacement</vscode-data-grid-cell>
         <vscode-data-grid-cell cell-type="columnheader" grid-column="3">Actions</vscode-data-grid-cell>
       </vscode-data-grid-row>
-      <vscode-data-grid-row v-for="(rule, index) in localRules" :key="rule.id">
+      <vscode-data-grid-row
+        v-for="(rule, index) in localRules"
+        :key="rule.id"
+        :class="{ 'row-dirty': dirtyIds.has(rule.id) }"
+      >
         <vscode-data-grid-cell grid-column="1">
           <vscode-text-field
             :value="rule.pattern"
@@ -24,6 +28,7 @@
           ></vscode-text-field>
         </vscode-data-grid-cell>
         <vscode-data-grid-cell grid-column="3" class="actions-cell">
+          <span v-if="dirtyIds.has(rule.id)" class="unsaved-indicator" title="Unsaved changes">●</span>
           
           <!-- Delete button -->
           <vscode-button appearance="icon" @click="requestRemoveRule(index)" aria-label="Delete rule">
@@ -108,11 +113,38 @@ const localRules = ref<RuleRow[]>([]);
 const showSaved = ref(false);
 const showSingleSaved = ref(false);
 const ruleToDelete = ref<{ rule: RuleRow; index: number } | null>(null);
+const dirtyIds = ref<Set<string>>(new Set());
 
 watch(
   () => props.rules,
   (newRules) => {
-    localRules.value = JSON.parse(JSON.stringify(newRules || []));
+    const incoming: RuleRow[] = JSON.parse(JSON.stringify(newRules || []));
+
+    if (localRules.value.length === 0) {
+      // First load — take everything as-is
+      localRules.value = incoming;
+      return;
+    }
+
+    // Merge: keep dirty rows untouched, update clean rows with latest prop values
+    const incomingMap = new Map(incoming.map(r => [r.id, r]));
+
+    // Update existing clean rows and add new rows from props
+    const merged: RuleRow[] = localRules.value.map(local => {
+      if (dirtyIds.value.has(local.id)) {
+        return local; // Keep unsaved edits
+      }
+      return incomingMap.get(local.id) ?? local;
+    });
+
+    // Add any brand-new rows from props that don't exist locally yet
+    for (const incoming of (newRules || [])) {
+      if (!merged.find(r => r.id === incoming.id)) {
+        merged.push(JSON.parse(JSON.stringify(incoming)));
+      }
+    }
+
+    localRules.value = merged;
   },
   { immediate: true, deep: true }
 );
@@ -155,6 +187,8 @@ function cancelRemoveRule() {
 function updateRule(index: number, field: 'pattern' | 'replacement', value: string) {
   if (localRules.value[index]) {
     localRules.value[index][field] = value;
+    // Mark this row as having unsaved changes
+    dirtyIds.value = new Set([...dirtyIds.value, localRules.value[index].id]);
   }
 }
 
@@ -167,6 +201,11 @@ function saveSingleRule(index: number) {
       pattern: ruleToSave.pattern.trim(),
       replacement: ruleToSave.replacement.trim(),
     });
+
+    // Row is now saved — remove from dirty tracking
+    const next = new Set(dirtyIds.value);
+    next.delete(ruleToSave.id);
+    dirtyIds.value = next;
 
     showSingleSaved.value = true;
     setTimeout(() => {
@@ -185,6 +224,8 @@ function confirmRules() {
     }));
 
   localRules.value = validRules;
+  // All rows saved — clear all dirty state
+  dirtyIds.value = new Set();
 
   emit('saveRules', validRules);
 
@@ -296,5 +337,18 @@ vscode-data-grid {
 .delete-button::part(control) {
   background-color: var(--vscode-errorForeground);
   color: var(--vscode-button-foreground);
+}
+
+.row-dirty {
+  border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
+  background-color: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.05));
+}
+
+.unsaved-indicator {
+  color: var(--vscode-inputValidation-warningBorder, #cca700);
+  font-size: 10px;
+  margin-right: 4px;
+  flex-shrink: 0;
+  align-self: center;
 }
 </style>

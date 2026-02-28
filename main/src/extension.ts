@@ -164,7 +164,7 @@ export async function activate(context: vscode.ExtensionContext) {
             vscode.window.showInformationMessage(`Anonymize prompts set to: ${anonSwitch}`);
         }
     );
-
+ 
 
     const openWebUI = vscode.commands.registerCommand(
         'prompthider.openUI',
