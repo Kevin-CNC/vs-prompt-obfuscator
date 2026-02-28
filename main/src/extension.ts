@@ -120,9 +120,13 @@ export async function activate(context: vscode.ExtensionContext) {
         // The user's prompt to be obfuscated
         const userPrompt = rqst.prompt;
         
-        console.log('Intercepted prompt:', userPrompt); // just echo it for now!
+        console.log('Intercepted prompt:', userPrompt);
 
-         stream.markdown(`Intercepted: ${userPrompt}`);
+        const result = await anonymizationEngine.anonymize(userPrompt); // Perform the anonymization
+
+        console.log('Anonymized:', result.anonymized);
+
+        stream.markdown(`Result: ${result.anonymized}`);
     });
     
     context.subscriptions.push(chatParticipant);
