@@ -137,6 +137,18 @@ export class ConfigManager {
         // 3. Create with default config structure
     }
 
+    getRules(): Array<{ pattern: string; replacement: string }> {
+        return this.loadConfig().rules
+            .filter(rule => rule.enabled)
+            .map(rule => ({
+                // Safely convert string | RegExp to string
+                pattern: typeof rule.pattern === 'string'
+                    ? rule.pattern
+                    : (rule.pattern as RegExp).source,
+                replacement: rule.replacement
+            }));
+    }
+
     // ---- Helpers for the webview UI ----
 
     getRulesheetName(): string {
