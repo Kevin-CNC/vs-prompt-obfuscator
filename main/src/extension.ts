@@ -120,18 +120,60 @@ export async function activate(context: vscode.ExtensionContext) {
     const anonymizationEngine = new AnonymizationEngine(tokenManager, configs);
 
     // Create the chat participant
-    const chatParticipant = vscode.chat.createChatParticipant('prompthider', async (rqst, context, stream, token) => {
-        // The user's prompt to be obfuscated
-        const userPrompt = rqst.prompt;
-        
-        console.log('Intercepted prompt:', userPrompt);
+    const chatParticipant = vscode.chat.createChatParticipant('prompthider', async (request, chatContext, stream, token) => {
+        // Intercept the user's raw prompt
+        const userPrompt = request.prompt;
+        console.log('[PromptHider] Original prompt:', userPrompt);
 
-        const result = await anonymizationEngine.anonymize(userPrompt); // Perform the anonymization
+        // Anonymize the prompt using the loaded rulesheet
+        const result = await anonymizationEngine.anonymize(userPrompt);
+        console.log('[PromptHider] Anonymized prompt:', result.anonymized);
 
-        console.log('Anonymized:', result.anonymized);
-        console.log('Stats:', result.stats);
+        // Notify the user that anonymization ran (only show detail if matches were found)
+        if (result.stats.totalMatches > 0) {
+            stream.markdown(`> **PromptHider**: ${result.stats.totalMatches} pattern(s) anonymized before sending.\n\n`);
+        }
 
-        stream.markdown(`**Anonymized Prompt:**\n\`\`\`\n${result.anonymized}\n\`\`\`\n\n**Matched patterns:** ${result.stats.totalMatches}`);
+        // Build message history from prior turns so the model has conversational context
+        const messages: vscode.LanguageModelChatMessage[] = [];
+
+        for (const turn of chatContext.history) {
+            if (turn instanceof vscode.ChatRequestTurn) {
+                // Re-anonymize history prompts too so tokens stay consistent
+                const histResult = await anonymizationEngine.anonymize(turn.prompt);
+                messages.push(vscode.LanguageModelChatMessage.User(histResult.anonymized));
+            } else if (turn instanceof vscode.ChatResponseTurn) {
+                // Collect plain text from previous assistant responses
+                const responseText = turn.response
+                    .filter((part): part is vscode.ChatResponseMarkdownPart =>
+                        part instanceof vscode.ChatResponseMarkdownPart)
+                    .map(part => part.value.value)
+                    .join('');
+                if (responseText) {
+                    messages.push(vscode.LanguageModelChatMessage.Assistant(responseText));
+                }
+            }
+        }
+
+        // Append the current (anonymized) user message
+        messages.push(vscode.LanguageModelChatMessage.User(result.anonymized));
+
+        // Send to the model the user already has selected in the chat panel
+        try {
+            const modelResponse = await request.model.sendRequest(messages, {}, token);
+
+            // Stream the model's response back to the chat view
+            for await (const chunk of modelResponse.text) {
+                stream.markdown(chunk);
+            }
+        } catch (err) {
+            if (err instanceof vscode.LanguageModelError) {
+                console.error('[PromptHider] LM error:', err.message, err.code);
+                stream.markdown(`**PromptHider error**: ${err.message}`);
+            } else {
+                throw err;
+            }
+        }
     });
     
     context.subscriptions.push(chatParticipant);
@@ -146,13 +188,6 @@ export async function activate(context: vscode.ExtensionContext) {
     // Register tree views
     vscode.window.registerTreeDataProvider('prompthider.mappingsView', mappingsViewProvider);
     vscode.window.registerWebviewViewProvider(RuleEditorProvider.viewType, ruleEditorProvider);
-
-    // TODO: Register commands
-
-    // Anonymize command toggle;
-    // Informs the user if their prompts will be anonymized or not.
-    // Switch toggle functionality.
-
 
     // COMMANDS HERE FOR THE EXTENSION
     let anonSwitch = false;
