@@ -1,7 +1,6 @@
 import { TokenManager } from './TokenManager';
 import { ConfigManager } from '../utils/ConfigManager';
-import { BUILTIN_PATTERNS } from './PatternLibrary';
-import { AhoCorasick, type PatternMatch } from './patternMatcher';
+import { RegexPatternMatcher, type PatternMatch } from './patternMatcher';
 
 export interface AnonymizationResult {
     original: string;
@@ -16,62 +15,66 @@ export interface AnonymizationResult {
 export class AnonymizationEngine {
     private tokenManager: TokenManager;
     private configManager: ConfigManager;
-    private ahoCorasick: AhoCorasick;
-
+    private patternMatcher: RegexPatternMatcher;
 
     constructor(tokenManager: TokenManager, configManager: ConfigManager) {
         this.tokenManager = tokenManager;
         this.configManager = configManager;
-        this.ahoCorasick = new AhoCorasick();
+        this.patternMatcher = new RegexPatternMatcher();
         this.initializePatterns();
     }
 
-
-    private initializePatterns(){
-        // Loads the rules from the configuration
-        const prjRules = this.configManager.getRules();
-
-        const patterns = prjRules.map(rule => ({
+    private initializePatterns() {
+        // Get rules from config
+        const rules = this.configManager.getRules();
+        
+        const patterns = rules.map(rule => ({
             pattern: rule.pattern,
             replacement: rule.replacement
         }));
 
-        this.ahoCorasick.addPatterns(patterns);
+        this.patternMatcher.build(patterns);
     }
 
-
-    async anonymize(context: string): Promise<AnonymizationResult> {
-        const matches = this.ahoCorasick.findMatches(context);
+    async anonymize(text: string): Promise<AnonymizationResult> {
+        // Find all pattern matches
+        const matches = this.patternMatcher.findMatches(text);
         const mappings = new Map<string, string>();
-        const patterns: Record<string, number> = {};
+        const patternBreakdown: Record<string, number> = {};
 
+        // Sort matches by position (descending) to avoid offset issues
+        matches.sort((a, b) => b.start - a.start);
 
-        // Process matches in reverse order to avoid messing up indices
-        matches.sort((a,b) => b.start - a.start);
+        let anonymized = text;
 
-        let anonymized = context;
-
+        // Replace matches from end to start (prevents offset shifts)
         for (const match of matches) {
-            // Generates the token for the match and adds it to the mapping <mapped:token>
-            const tkn = this.tokenManager.generateToken(match.match, match.replacement);
-            mappings.set(match.match, tkn);
+            // Generate token using TokenManager
+            const token = this.tokenManager.generateToken(match.replacement, match.match);
+            mappings.set(match.match, token);
 
+            // Replace the matched text with the token
+            anonymized = 
+                anonymized.substring(0, match.start) + 
+                token + 
+                anonymized.substring(match.end);
 
-            anonymized = anonymized.substring(0, match.start) + tkn + anonymized.substring(match.end); 
+            // Track statistics
+            patternBreakdown[match.pattern] = (patternBreakdown[match.pattern] || 0) + 1;
         }
 
         return {
-            original: context,
+            original: text,
             anonymized,
             mappings,
             stats: {
                 totalMatches: matches.length,
-                patternBreakdown: patterns
+                patternBreakdown
             }
         };
     }
 
-    async detectPatterns(cntx: string): Promise<PatternMatch[]> {
-        return this.ahoCorasick.findMatches(cntx);
+    async detectPatterns(text: string): Promise<PatternMatch[]> {
+        return this.patternMatcher.findMatches(text);
     }
 }
