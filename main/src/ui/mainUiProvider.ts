@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ConfigManager } from '../utils/ConfigManager';
-import { config } from 'process';
 
 export class mainUIProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
