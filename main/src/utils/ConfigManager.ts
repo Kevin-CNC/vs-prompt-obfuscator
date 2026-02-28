@@ -19,6 +19,33 @@ export class ConfigManager {
         this.configFilePath = ruleFilePath;
     }
 
+    loadConfig(): ProjectConfig {
+        try {
+            if (!this.rulesheetExists(this.configFilePath)) {
+                return this.getDefaultConfig();
+            }
+            const content = fs.readFileSync(this.configFilePath, 'utf-8');
+            const config = JSON.parse(content) as ProjectConfig;
+            if (!this.isActuallyWellParsed(config)) {
+                return this.getDefaultConfig();
+            }
+            return config;
+        } catch (error) {
+            console.error("Error loading config:", error);
+            return this.getDefaultConfig();
+        }
+    }
+
+    private getDefaultConfig(): ProjectConfig {
+        return {
+            version: "0",
+            enabled: false,
+            rules: [],
+            tokenConsistency: false,
+            autoAnonymize: false,
+            showPreview: true
+        };
+    }
 
     // helper for getting the workspace root path
     private getWorkspacePth(): string{

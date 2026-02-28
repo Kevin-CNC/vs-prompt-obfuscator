@@ -10,8 +10,6 @@ export class TokenManager {
         this.context = context;
         this.loadMappings();
     }
-    
-
     generateToken(type: string, originalValue: string): string {
         // Check if value already has a token (for consistency)
         const existing = this.mappings.get(originalValue);
