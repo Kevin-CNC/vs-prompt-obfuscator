@@ -34,6 +34,13 @@ export class TokenManager {
         return token;
     }
 
+    storeMapping(originalValue: string, token: string): void {
+        // Always overwrite — ensures stale persisted mappings never bleed through
+        this.mappings.set(originalValue, token);
+        this.reverseMappings.set(token, originalValue);
+        this.saveMappings();
+    }
+
     private formatToken(type: string, index: number): string {
         // Format tokens based on type
         switch(type.toLowerCase()) {
