@@ -119,6 +119,23 @@ export async function activate(context: vscode.ExtensionContext) {
     const configs = new ConfigManager(selectedFile.fsPath);
     const anonymizationEngine = new AnonymizationEngine(tokenManager, configs);
 
+    // Create the chat participant
+    const chatParticipant = vscode.chat.createChatParticipant('prompthider', async (rqst, context, stream, token) => {
+        // The user's prompt to be obfuscated
+        const userPrompt = rqst.prompt;
+        
+        console.log('Intercepted prompt:', userPrompt);
+
+        const result = await anonymizationEngine.anonymize(userPrompt); // Perform the anonymization
+
+        console.log('Anonymized:', result.anonymized);
+        console.log('Stats:', result.stats);
+
+        stream.markdown(`**Anonymized Prompt:**\n\`\`\`\n${result.anonymized}\n\`\`\`\n\n**Matched patterns:** ${result.stats.totalMatches}`);
+    });
+    
+    context.subscriptions.push(chatParticipant);
+
     // Register UI providers
     const mappingsViewProvider = new MappingsViewProvider(tokenManager);
     const ruleEditorProvider = new RuleEditorProvider(

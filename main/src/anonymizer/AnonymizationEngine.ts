@@ -1,6 +1,6 @@
 import { TokenManager } from './TokenManager';
 import { ConfigManager } from '../utils/ConfigManager';
-import { BUILTIN_PATTERNS } from './PatternLibrary';
+import { RegexPatternMatcher, type PatternMatch } from './patternMatcher';
 
 export interface AnonymizationResult {
     original: string;
@@ -15,34 +15,66 @@ export interface AnonymizationResult {
 export class AnonymizationEngine {
     private tokenManager: TokenManager;
     private configManager: ConfigManager;
+    private patternMatcher: RegexPatternMatcher;
 
     constructor(tokenManager: TokenManager, configManager: ConfigManager) {
         this.tokenManager = tokenManager;
         this.configManager = configManager;
+        this.patternMatcher = new RegexPatternMatcher();
+        this.initializePatterns();
+    }
+
+    private initializePatterns() {
+        // Get rules from config (reload fresh each time)
+        const rules = this.configManager.getRules();
+        this.patternMatcher.build(rules);
     }
 
     async anonymize(text: string): Promise<AnonymizationResult> {
-        // TODO: Implement the core anonymization logic
-        // 1. Load project rules from ConfigManager
-        // 2. Combine with BUILTIN_PATTERNS
-        // 3. Apply regex patterns to text
-        // 4. Replace matches with tokens from TokenManager
-        // 5. Return result with stats
-        
+        // Reload patterns fresh so any rule changes are picked up
+        this.initializePatterns();
+
+        // Find all pattern matches
+        const matches = this.patternMatcher.findMatches(text);
+        const mappings = new Map<string, string>();
+        const patternBreakdown: Record<string, number> = {};
+
+        // Sort matches by position (descending) to avoid offset issues
+        matches.sort((a, b) => b.start - a.start);
+
+        let anonymized = text;
+
+        // Replace matches from end to start (prevents offset shifts)
+        for (const match of matches) {
+            // Use the replacement label from the rule directly — no formatting, no index
+            const token = match.replacement;
+
+            // Store bidirectional mapping for later de-obfuscation
+            this.tokenManager.storeMapping(match.match, token);
+            mappings.set(match.match, token);
+
+            // Replace the matched text with the token
+            anonymized = 
+                anonymized.substring(0, match.start) + 
+                token + 
+                anonymized.substring(match.end);
+
+            // Track statistics
+            patternBreakdown[match.pattern] = (patternBreakdown[match.pattern] || 0) + 1;
+        }
+
         return {
             original: text,
-            anonymized: text, // TODO: Replace with actual anonymized text
-            mappings: new Map(),
+            anonymized,
+            mappings,
             stats: {
-                totalMatches: 0,
-                patternBreakdown: {}
+                totalMatches: matches.length,
+                patternBreakdown
             }
         };
     }
 
-    async detectPatterns(text: string): Promise<Array<{ type: string; match: string; start: number; end: number }>> {
-        // TODO: Implement pattern detection without replacing
-        // Useful for highlighting sensitive data before anonymizing
-        return [];
+    async detectPatterns(text: string): Promise<PatternMatch[]> {
+        return this.patternMatcher.findMatches(text);
     }
 }

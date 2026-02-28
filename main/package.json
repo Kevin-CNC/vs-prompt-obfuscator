@@ -30,6 +30,13 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "chatParticipants": [
+      {
+        "id": "prompthider",
+        "name": "PromptHider",
+        "description": "Obfuscate sensitive data in your prompts"
+      }
+    ],
     "commands": [
       {
         "command": "prompthider.activate",

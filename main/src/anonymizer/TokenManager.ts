@@ -10,7 +10,6 @@ export class TokenManager {
         this.context = context;
         this.loadMappings();
     }
-
     generateToken(type: string, originalValue: string): string {
         // Check if value already has a token (for consistency)
         const existing = this.mappings.get(originalValue);
@@ -35,6 +34,13 @@ export class TokenManager {
         return token;
     }
 
+    storeMapping(originalValue: string, token: string): void {
+        // Always overwrite — ensures stale persisted mappings never bleed through
+        this.mappings.set(originalValue, token);
+        this.reverseMappings.set(token, originalValue);
+        this.saveMappings();
+    }
+
     private formatToken(type: string, index: number): string {
         // Format tokens based on type
         switch(type.toLowerCase()) {
@@ -53,7 +59,9 @@ export class TokenManager {
             case 'path':
                 return `/PATH_${index}`;
             default:
-                return `${type.toUpperCase()}_${index}`;
+                // Custom replacement labels are used as-is (user already named the token)
+                // Only append index if there are multiple distinct values under the same label
+                return index > 1 ? `${type.toUpperCase()}_${index}` : `${type.toUpperCase()}`;
         }
     }
 
