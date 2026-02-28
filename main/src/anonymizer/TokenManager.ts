@@ -35,7 +35,13 @@ export class TokenManager {
     }
 
     storeMapping(originalValue: string, token: string): void {
-        // Always overwrite — ensures stale persisted mappings never bleed through
+        // If the original value was previously mapped to a DIFFERENT token, remove
+        // the stale reverse entry so deAnonymize never resolves an outdated name.
+        const previousToken = this.mappings.get(originalValue);
+        if (previousToken !== undefined && previousToken !== token) {
+            this.reverseMappings.delete(previousToken);
+        }
+
         this.mappings.set(originalValue, token);
         this.reverseMappings.set(token, originalValue);
         this.saveMappings();
@@ -71,6 +77,15 @@ export class TokenManager {
 
     getAllMappings(): Map<string, string> {
         return new Map(this.mappings);
+    }
+
+    /**
+     * Returns the token→original reverse mapping.
+     * Used by CommandExecutor to de-anonymize commands before terminal execution.
+     * The returned map is read-only — mutations have no effect on internal state.
+     */
+    getReverseMappings(): ReadonlyMap<string, string> {
+        return this.reverseMappings;
     }
 
     clearMappings(): void {

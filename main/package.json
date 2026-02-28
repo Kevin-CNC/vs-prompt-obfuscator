@@ -37,6 +37,24 @@
         "description": "Obfuscate sensitive data in your prompts"
       }
     ],
+    "languageModelTools": [
+      {
+        "name": "prompthider_execute_command",
+        "displayName": "Execute Terminal Command",
+        "canBeReferencedInPrompt": false,
+        "modelDescription": "Executes a shell command in the VS Code integrated terminal. Use this tool whenever the user asks you to run, execute, or invoke a command. The command string may contain anonymized placeholders (such as IP_1, USER_A@domain.tld, API_KEY_1) — these are automatically resolved to their real values before execution, so always pass the anonymized token as-is.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "The shell command to execute. Pass anonymized tokens exactly as they appear (e.g. 'ssh IP_1', 'curl -H Authorization: API_KEY_1 https://HOST_1/api'). They will be de-anonymized locally before the command runs."
+            }
+          },
+          "required": ["command"]
+        }
+      }
+    ],
     "commands": [
       {
         "command": "prompthider.activate",

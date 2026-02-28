@@ -7,6 +7,7 @@ import { window } from 'vscode';
 import { mainUIProvider } from './ui/mainUiProvider';
 import { RuleEditorProvider } from './ui/RuleEditorProvider';
 import { MappingsViewProvider } from './ui/MappingsViewProvider';
+import { CommandExecutor } from './tools/CommandExecutor';
 import * as fs from 'fs';
 
 function updateDevFiles(rulesheetRelativePath: string) {
@@ -118,20 +119,131 @@ export async function activate(context: vscode.ExtensionContext) {
     const tokenManager = new TokenManager(context);
     const configs = new ConfigManager(selectedFile.fsPath);
     const anonymizationEngine = new AnonymizationEngine(tokenManager, configs);
+    const commandExecutor = new CommandExecutor(tokenManager);
+
+    // Register the execute_command tool so the LM can invoke it
+    const toolDisposable = vscode.lm.registerTool('prompthider_execute_command', commandExecutor);
+    context.subscriptions.push(toolDisposable);
+
+    // Build the LanguageModelChatTool descriptor from the registered tool metadata
+    function getToolDefinitions(): vscode.LanguageModelChatTool[] {
+        return vscode.lm.tools
+            .filter(t => t.name === 'prompthider_execute_command')
+            .map(t => ({
+                name: t.name,
+                description: t.description,
+                inputSchema: t.inputSchema ?? {}
+            }));
+    }
 
     // Create the chat participant
-    const chatParticipant = vscode.chat.createChatParticipant('prompthider', async (rqst, context, stream, token) => {
-        // The user's prompt to be obfuscated
-        const userPrompt = rqst.prompt;
-        
-        console.log('Intercepted prompt:', userPrompt);
+    const chatParticipant = vscode.chat.createChatParticipant('prompthider', async (request, chatContext, stream, token) => {
+        // Intercept the user's raw prompt
+        const userPrompt = request.prompt;
+        console.log('[PromptHider] Original prompt:', userPrompt);
 
-        const result = await anonymizationEngine.anonymize(userPrompt); // Perform the anonymization
+        // Anonymize the prompt using the loaded rulesheet
+        const result = await anonymizationEngine.anonymize(userPrompt);
+        console.log('[PromptHider] Anonymized prompt:', result.anonymized);
 
-        console.log('Anonymized:', result.anonymized);
-        console.log('Stats:', result.stats);
+        // Notify the user that anonymization ran (only show detail if matches were found)
+        if (result.stats.totalMatches > 0) {
+            stream.markdown(`> **PromptHider**: ${result.stats.totalMatches} pattern(s) anonymized before sending.\n\n`);
+        }
 
-        stream.markdown(`**Anonymized Prompt:**\n\`\`\`\n${result.anonymized}\n\`\`\`\n\n**Matched patterns:** ${result.stats.totalMatches}`);
+        // Build message history from prior turns so the model has conversational context
+        const messages: vscode.LanguageModelChatMessage[] = [];
+
+        for (const turn of chatContext.history) {
+            if (turn instanceof vscode.ChatRequestTurn) {
+                // Re-anonymize history prompts too so tokens stay consistent
+                const histResult = await anonymizationEngine.anonymize(turn.prompt);
+                messages.push(vscode.LanguageModelChatMessage.User(histResult.anonymized));
+            } else if (turn instanceof vscode.ChatResponseTurn) {
+                // Collect plain text from previous assistant responses
+                const responseText = turn.response
+                    .filter((part): part is vscode.ChatResponseMarkdownPart =>
+                        part instanceof vscode.ChatResponseMarkdownPart)
+                    .map(part => part.value.value)
+                    .join('');
+                if (responseText) {
+                    messages.push(vscode.LanguageModelChatMessage.Assistant(responseText));
+                }
+            }
+        }
+
+        // Append the current (anonymized) user message
+        messages.push(vscode.LanguageModelChatMessage.User(result.anonymized));
+
+        const toolDefs = getToolDefinitions();
+
+        // Agentic tool-calling loop:
+        // The model may respond with tool call parts instead of (or alongside) text.
+        // We execute each requested tool client-side and feed results back until the
+        // model produces a final text-only response.
+        try {
+            let continueLoop = true;
+            while (continueLoop) {
+                continueLoop = false;
+
+                const modelResponse = await request.model.sendRequest(
+                    messages,
+                    { tools: toolDefs },
+                    token
+                );
+
+                // Collect parts so we can build the assistant history entry
+                const assistantParts: (vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart)[] = [];
+
+                for await (const part of modelResponse.stream) {
+                    if (part instanceof vscode.LanguageModelTextPart) {
+                        stream.markdown(part.value);
+                        assistantParts.push(part);
+                    } else if (part instanceof vscode.LanguageModelToolCallPart) {
+                        // Model wants to execute a command — do not stream; handle below
+                        assistantParts.push(part);
+                        continueLoop = true;
+                    }
+                }
+
+                if (continueLoop && assistantParts.length > 0) {
+                    // Record the assistant's turn (with tool call parts) in message history
+                    messages.push(vscode.LanguageModelChatMessage.Assistant(assistantParts));
+
+                    // Invoke each requested tool and accumulate results
+                    const toolResultParts: vscode.LanguageModelToolResultPart[] = [];
+
+                    for (const part of assistantParts) {
+                        if (part instanceof vscode.LanguageModelToolCallPart) {
+                            console.log(`[PromptHider] Tool call: ${part.name}`, part.input);
+
+                            const toolResult = await vscode.lm.invokeTool(
+                                part.name,
+                                {
+                                    input: part.input,
+                                    toolInvocationToken: request.toolInvocationToken
+                                },
+                                token
+                            );
+
+                            toolResultParts.push(
+                                new vscode.LanguageModelToolResultPart(part.callId, toolResult.content)
+                            );
+                        }
+                    }
+
+                    // Append tool results as a User turn so the model can continue
+                    messages.push(vscode.LanguageModelChatMessage.User(toolResultParts));
+                }
+            }
+        } catch (err) {
+            if (err instanceof vscode.LanguageModelError) {
+                console.error('[PromptHider] LM error:', err.message, err.code);
+                stream.markdown(`**PromptHider error**: ${err.message}`);
+            } else {
+                throw err;
+            }
+        }
     });
     
     context.subscriptions.push(chatParticipant);
@@ -146,13 +258,6 @@ export async function activate(context: vscode.ExtensionContext) {
     // Register tree views
     vscode.window.registerTreeDataProvider('prompthider.mappingsView', mappingsViewProvider);
     vscode.window.registerWebviewViewProvider(RuleEditorProvider.viewType, ruleEditorProvider);
-
-    // TODO: Register commands
-
-    // Anonymize command toggle;
-    // Informs the user if their prompts will be anonymized or not.
-    // Switch toggle functionality.
-
 
     // COMMANDS HERE FOR THE EXTENSION
     let anonSwitch = false;
