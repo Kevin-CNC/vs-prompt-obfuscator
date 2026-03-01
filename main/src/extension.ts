@@ -68,7 +68,7 @@ async function pickWorkspaceFolder(
         return picked.folder;
     }
 
-    return preferredFolder ?? workspaceFolders[0];
+    return undefined;
 }
 
 async function findRulesheetsInWorkspace(folder: vscode.WorkspaceFolder): Promise<vscode.Uri[]> {
@@ -148,7 +148,7 @@ async function pickRulesheetInWorkspace(
 
     const picked = await vscode.window.showQuickPick(items, { placeHolder });
     if (!picked) {
-        return rulesheets[0];
+        return undefined;
     }
 
     if (picked.createNew) {
@@ -188,8 +188,8 @@ function getConfigForFolder(folder: vscode.WorkspaceFolder): vscode.WorkspaceCon
 }
 
 function getMaxToolRounds(folder: vscode.WorkspaceFolder): number {
-    const configured = getConfigForFolder(folder).get<number>('agent.maxToolRounds', 20);
-    const normalized = Number.isFinite(configured) ? Math.floor(configured) : 20;
+    const configured = getConfigForFolder(folder).get<number>('agent.maxToolRounds', 10);
+    const normalized = Number.isFinite(configured) ? Math.floor(configured) : 10;
     return Math.max(1, Math.min(100, normalized));
 }
 
