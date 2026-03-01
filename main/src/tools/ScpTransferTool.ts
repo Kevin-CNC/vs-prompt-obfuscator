@@ -48,11 +48,19 @@ export class ScpTransferTool implements vscode.LanguageModelTool<ScpTransferInpu
         console.log('[ScpTransferTool] SCP command (anonymized):', scpCommand);
 
         try {
-            const { exitCode, safeStdout, safeStderr } =
+            const { exitCode, safeStdout, safeStderr, mode } =
                 await this.commandExecutor.executeCommand(
                     scpCommand,
                     cancellationToken
                 );
+
+            if (mode === 'terminal') {
+                return new vscode.LanguageModelToolResult([
+                    new vscode.LanguageModelTextPart(
+                        'SCP command sent to the PromptHider terminal for interactive/background execution. No captured transfer output is available in terminal mode.'
+                    )
+                ]);
+            }
 
             if (exitCode === 0) {
                 const parts = [
