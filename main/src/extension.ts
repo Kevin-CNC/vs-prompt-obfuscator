@@ -122,6 +122,26 @@ export async function activate(context: vscode.ExtensionContext) {
     // Create mappingsViewProvider early so the chat participant can refresh it.
     const mappingsViewProvider = new MappingsViewProvider(tokenManager);
 
+    const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+    statusBarItem.command = 'prompthider.openUI';
+
+    const updateStatusBar = async () => {
+        const loadedConfig = await configs.loadFullConfig();
+        const ruleCount = loadedConfig?.rules?.length ?? 0;
+        const rulesheetName = configs.getRulesheetName();
+
+        statusBarItem.text = `$(shield) PromptHider: ${rulesheetName} (${ruleCount})`;
+        statusBarItem.tooltip =
+            `Prompt Hider\n` +
+            `Rulesheet: ${rulesheetName}\n` +
+            `Rules: ${ruleCount}\n\n` +
+            `Anonymization is applied only when using the @PromptHider chat participant.`;
+        statusBarItem.show();
+    };
+
+    await updateStatusBar();
+    context.subscriptions.push(statusBarItem);
+
     const toolDisposable = vscode.lm.registerTool('prompthider_execute_command', commandExecutor);
     const scpToolDisposable = vscode.lm.registerTool('prompthider_scp_transfer', scpTransferTool);
     context.subscriptions.push(toolDisposable, scpToolDisposable);
@@ -291,7 +311,8 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(chatParticipant);
     const ruleEditorProvider = new RuleEditorProvider(
         vscode.Uri.file(context.extensionPath),
-        configs
+        configs,
+        updateStatusBar
     );
 
     vscode.window.registerTreeDataProvider('prompthider.mappingsView', mappingsViewProvider);
@@ -303,7 +324,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const openWebUI = vscode.commands.registerCommand(
         'prompthider.openUI',
         () => {
-            mainUIProvider.show(context, configs);
+            mainUIProvider.show(context, configs, updateStatusBar);
         });
 
     const showMappingsCommand = vscode.commands.registerCommand(

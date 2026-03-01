@@ -5,6 +5,7 @@ import { ConfigManager } from '../utils/ConfigManager';
 
 export class mainUIProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
+    private static onConfigChanged?: () => void;
 
     /**
      * Post an arbitrary message to the webview, if it exists.
@@ -16,7 +17,11 @@ export class mainUIProvider {
         }
     }
 
-    public static show(context: vscode.ExtensionContext, configManager?: ConfigManager) {
+    public static show(context: vscode.ExtensionContext, configManager?: ConfigManager, onConfigChanged?: () => void) {
+        if (onConfigChanged) {
+            mainUIProvider.onConfigChanged = onConfigChanged;
+        }
+
         // If a panel already exists, just reveal it
         if (mainUIProvider.currentPanel) {
             mainUIProvider.currentPanel.reveal(vscode.ViewColumn.One);
@@ -64,15 +69,9 @@ export class mainUIProvider {
 
                 case 'saveRules': {
                     if (!configManager) { break; }
-                    const rules = (message.rules as any[]).map(r => ({
-                        id: r.id as string,
-                        type: 'custom' as const,
-                        pattern: r.pattern as string,
-                        replacement: r.replacement as string,
-                        enabled: true,
-                        description: `Custom rule: ${r.pattern} → ${r.replacement}`,
-                    }));
+                    const rules = mainUIProvider.normalizeRules(message.rules as any[]);
                     await configManager.saveProjectRules(rules);
+                    mainUIProvider.onConfigChanged?.();
                     panel.webview.postMessage({ command: 'rulesSaved' });
                     break;
                 }
@@ -108,6 +107,7 @@ export class mainUIProvider {
 
                     // Save to disk (ConfigManager will handle pattern normalization)
                     await configManager.saveProjectRules(currentRules);
+                    mainUIProvider.onConfigChanged?.();
                     panel.webview.postMessage({ command: 'rulesSaved' });
                     break;
                 }
@@ -124,17 +124,19 @@ export class mainUIProvider {
                     
                     // Save the updated rules
                     await configManager.saveProjectRules(updatedRules);
+                    mainUIProvider.onConfigChanged?.();
                     panel.webview.postMessage({ command: 'ruleDeleted' });
                     break;
                 }
 
-                case 'toggleEnabled': {
+                case 'importRules': {
+                    await mainUIProvider.importRulesToWebview(panel.webview);
+                    break;
+                }
+
+                case 'exportRules': {
                     if (!configManager) { break; }
-                    await configManager.setEnabled(message.enabled as boolean);
-                    panel.webview.postMessage({
-                        command: 'enabledUpdated',
-                        enabled: message.enabled,
-                    });
+                    await mainUIProvider.exportRulesFromWebview(configManager, message.rules as any[]);
                     break;
                 }
 
@@ -179,6 +181,89 @@ export class mainUIProvider {
             panel.webview.html = html;
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to load webview: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    private static normalizeRules(rules: any[]) {
+        return (rules ?? []).map(r => ({
+            id: String(r.id),
+            type: 'custom' as const,
+            pattern: String(r.pattern ?? ''),
+            replacement: String(r.replacement ?? ''),
+            enabled: true,
+            description: `Custom rule: ${String(r.pattern ?? '')} → ${String(r.replacement ?? '')}`,
+        }));
+    }
+
+    private static async importRulesToWebview(webview: vscode.Webview): Promise<void> {
+        const picked = await vscode.window.showOpenDialog({
+            canSelectMany: false,
+            canSelectFiles: true,
+            canSelectFolders: false,
+            openLabel: 'Import Rules',
+            filters: {
+                'JSON Files': ['json'],
+                'All Files': ['*'],
+            },
+        });
+
+        if (!picked || picked.length === 0) {
+            return;
+        }
+
+        try {
+            const content = fs.readFileSync(picked[0].fsPath, 'utf8');
+            const parsed = JSON.parse(content) as any;
+            const sourceRules = Array.isArray(parsed) ? parsed : Array.isArray(parsed.rules) ? parsed.rules : [];
+            const normalizedRules = sourceRules
+                .map((r: any) => ({
+                    id: String(r.id ?? `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
+                    pattern: typeof r.pattern === 'string' ? r.pattern : String(r.pattern?.source ?? ''),
+                    replacement: String(r.replacement ?? ''),
+                }))
+                .filter((r: { pattern: string; replacement: string }) => r.pattern.trim() !== '' || r.replacement.trim() !== '');
+
+            webview.postMessage({
+                command: 'importedRules',
+                rules: normalizedRules,
+                fileName: path.basename(picked[0].fsPath),
+            });
+            vscode.window.showInformationMessage(`Imported ${normalizedRules.length} rule(s) from ${path.basename(picked[0].fsPath)}.`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to import rules: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+
+    private static async exportRulesFromWebview(configManager: ConfigManager, rules: any[]): Promise<void> {
+        const saveUri = await vscode.window.showSaveDialog({
+            saveLabel: 'Export Rules',
+            filters: { 'JSON Files': ['json'] },
+            defaultUri: vscode.Uri.file(`${configManager.getRulesheetName()}.rules.export.json`),
+        });
+
+        if (!saveUri) {
+            return;
+        }
+
+        try {
+            const normalizedRules = (rules ?? [])
+                .map(r => ({
+                    id: String(r.id),
+                    pattern: String(r.pattern ?? ''),
+                    replacement: String(r.replacement ?? ''),
+                }))
+                .filter((r: { pattern: string; replacement: string }) => r.pattern.trim() !== '' || r.replacement.trim() !== '');
+
+            fs.writeFileSync(saveUri.fsPath, JSON.stringify({
+                version: 1,
+                exportedAt: new Date().toISOString(),
+                rulesheet: configManager.getRulesheetName(),
+                rules: normalizedRules,
+            }, null, 2), 'utf8');
+
+            vscode.window.showInformationMessage(`Exported ${normalizedRules.length} rule(s) to ${path.basename(saveUri.fsPath)}.`);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to export rules: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 }

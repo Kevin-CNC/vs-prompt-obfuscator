@@ -9,15 +9,23 @@
       </div>
     </header>
 
+    <div class="scope-note" role="note" aria-live="polite">
+      Anonymization is applied only when you chat with <strong>@PromptHider</strong>.
+    </div>
+
     <!-- Rule Editor -->
     <RuleEditor
       :rules="rules"
       :pending-scanned-rules="pendingScannedRules"
+      :pending-imported-rules="pendingImportedRules"
       @save-rules="handleSaveRules"
       @save-single-rule="handleSaveSingleRule"
       @delete-rule="handleDeleteRule"
       @scan-iac-file="handleScanIacFile"
       @scanned-rules-consumed="pendingScannedRules = []"
+      @import-rules="handleImportRules"
+      @export-rules="handleExportRules"
+      @imported-rules-consumed="pendingImportedRules = []"
     />
 
     <!-- Loading overlay: shown until 'init' arrives from the extension host -->
@@ -47,7 +55,6 @@ provideVSCodeDesignSystem().register(
 const vscode = acquireVsCodeApi();
 
 const rulesheetName = ref('Loading...');
-const enabled = ref(false);
 const isLoading = ref(true);
 
 interface SimpleRule {
@@ -81,8 +88,17 @@ function handleScanIacFile() {
   vscode.postMessage({ command: 'scanIacFile' });
 }
 
+function handleImportRules() {
+  vscode.postMessage({ command: 'importRules' });
+}
+
+function handleExportRules(rulesToExport: SimpleRule[]) {
+  vscode.postMessage({ command: 'exportRules', rules: rulesToExport });
+}
+
 /** Ref passed down to RuleEditor when scanned rules arrive */
 const pendingScannedRules = ref<SimpleRule[]>([]);
+const pendingImportedRules = ref<SimpleRule[]>([]);
 
 window.addEventListener('message', (event) => {
   const msg = event.data;
@@ -90,14 +106,13 @@ window.addEventListener('message', (event) => {
     case 'init':
       rulesheetName.value = msg.rulesheetName ?? 'Unknown';
       rules.value = msg.rules ?? [];
-      enabled.value = msg.enabled ?? false;
       isLoading.value = false;
-      break;
-    case 'enabledUpdated':
-      enabled.value = msg.enabled;
       break;
     case 'scannedRules':
       pendingScannedRules.value = msg.rules ?? [];
+      break;
+    case 'importedRules':
+      pendingImportedRules.value = msg.rules ?? [];
       break;
   }
 });
@@ -159,6 +174,17 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.scope-note {
+  margin: 10px 20px 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-editorInfo-border, var(--vscode-textLink-foreground));
+  background-color: var(--vscode-editorInfo-background, transparent);
+  color: var(--vscode-editorInfo-foreground, var(--vscode-editor-foreground));
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 /* ─── Loading overlay ─────────────────────────────────────── */
