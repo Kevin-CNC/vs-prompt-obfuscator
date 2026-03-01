@@ -64,6 +64,7 @@
       {
         "command": "prompthider.openUI",
         "title": "Open Main UI",
+        "icon": "$(window)",
         "category": "Prompt Hider"
       },
       {
@@ -89,6 +90,12 @@
       {
         "command": "prompthider.clearMappings",
         "title": "Clear Token Mappings",
+        "category": "Prompt Hider"
+      },
+      {
+        "command": "prompthider.scanIacFile",
+        "title": "Scan IaC File for Patterns",
+        "icon": "$(search)",
         "category": "Prompt Hider"
       }
     ],
@@ -144,6 +151,13 @@
       ]
     },
     "menus": {
+      "view/title": [
+        {
+          "command": "prompthider.openUI",
+          "when": "view == prompthider.mappingsView || view == prompthider.rulesView",
+          "group": "navigation"
+        }
+      ],
       "editor/context": [
         {
           "when": "editorHasSelection",
