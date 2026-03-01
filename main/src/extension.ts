@@ -7,6 +7,7 @@ import { mainUIProvider } from './ui/mainUiProvider';
 import { RuleEditorProvider } from './ui/RuleEditorProvider';
 import { MappingsViewProvider } from './ui/MappingsViewProvider';
 import { CommandExecutor } from './tools/CommandExecutor';
+import { IacScanner } from './scanner/IacScanner';
 import * as fs from 'fs';
 
 function updateDevFiles(rulesheetRelativePath: string) {
@@ -283,10 +284,64 @@ export async function activate(context: vscode.ExtensionContext) {
         }
     );
 
+    const scanIacFileCommand = vscode.commands.registerCommand(
+        'prompthider.scanIacFile',
+        async () => {
+            const fileUris = await vscode.window.showOpenDialog({
+                canSelectMany: false,
+                canSelectFolders: false,
+                canSelectFiles: true,
+                openLabel: 'Scan for Sensitive Patterns',
+                filters: {
+                    'Infrastructure as Code': ['tf', 'tfvars', 'yml', 'yaml', 'json'],
+                    'All Files': ['*'],
+                },
+            });
+
+            if (!fileUris || fileUris.length === 0) { return; }
+
+            const filePath = fileUris[0].fsPath;
+
+            try {
+                const scannedRules = await IacScanner.scanFile(filePath);
+
+                if (scannedRules.length === 0) {
+                    vscode.window.showInformationMessage('No sensitive patterns detected in the selected file.');
+                    return;
+                }
+
+                // Ensure the main UI panel is open so we can push the rules into it
+                mainUIProvider.show(context, configs);
+
+                // Give the webview a moment to initialise if it was just created
+                setTimeout(() => {
+                    mainUIProvider.postMessage({
+                        command: 'scannedRules',
+                        rules: scannedRules.map(r => ({
+                            id: r.id,
+                            pattern: r.pattern,
+                            replacement: r.replacement,
+                        })),
+                        fileName: path.basename(filePath),
+                    });
+                }, 500);
+
+                vscode.window.showInformationMessage(
+                    `Found ${scannedRules.length} potential pattern(s) in ${path.basename(filePath)}. Review and save in the UI.`
+                );
+            } catch (err) {
+                vscode.window.showErrorMessage(
+                    `Failed to scan file: ${err instanceof Error ? err.message : 'Unknown error'}`
+                );
+            }
+        }
+    );
+
     context.subscriptions.push(
         openWebUI,
         showMappingsCommand,
-        clearMappingsCommand
+        clearMappingsCommand,
+        scanIacFileCommand
     );
 }
 
