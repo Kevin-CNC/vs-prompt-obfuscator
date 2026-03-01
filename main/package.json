@@ -53,6 +53,30 @@
           },
           "required": ["command"]
         }
+      },
+      {
+        "name": "prompthider_scp_transfer",
+        "displayName": "Transfer File via SCP",
+        "canBeReferencedInPrompt": false,
+        "modelDescription": "Transfers files between the local machine and a remote server via SCP. Paths may contain anonymized tokens (IP_1, FILE_PATH_1, etc.) which are automatically resolved before execution. Use for uploading scripts, configs, or downloading reports and logs.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "Source path. For remote files use 'user@HOST_TOKEN:/remote/path'. For local files use a local path or FILE_PATH token."
+            },
+            "destination": {
+              "type": "string",
+              "description": "Destination path. For remote files use 'user@HOST_TOKEN:/remote/path'. For local files use a local path or FILE_PATH token."
+            },
+            "recursive": {
+              "type": "boolean",
+              "description": "Set to true to copy directories recursively (-r flag). Defaults to false."
+            }
+          },
+          "required": ["source", "destination"]
+        }
       }
     ],
     "commands": [
