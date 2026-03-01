@@ -8,6 +8,8 @@ export interface CommandInput {
     command: string;
 }
 
+type ExecutionMode = 'captured' | 'terminal';
+
 interface ExecutionResult {
     stdout: string;
     stderr: string;
@@ -19,6 +21,7 @@ type CommandType = 'ssh' | 'scp' | 'sftp' | 'local';
 
 export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
     private terminal: vscode.Terminal | undefined;
+    private configurationScopeUri: vscode.Uri | undefined;
 
     // ── Adaptive timeouts ────────────────────────────────
     private static readonly LOCAL_TIMEOUT_MS  = 30_000;   // 30 s — local commands
@@ -35,6 +38,10 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
 
     constructor(private readonly tokenManager: TokenManager) {}
 
+    setConfigurationScope(scopeUri: vscode.Uri): void {
+        this.configurationScopeUri = scopeUri;
+    }
+
     // ── Tool interface (LanguageModelTool) ────────────────
 
     async invoke(
@@ -50,9 +57,20 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
         }
 
         try {
-            const { exitCode, safeStdout, safeStderr } = await this.executeCommand(
-                rawCommand, cancellationToken, { mirrorToTerminal: true }
+            const executionMode = this.getExecutionMode();
+            const { exitCode, safeStdout, safeStderr, mode } = await this.executeCommand(
+                rawCommand,
+                cancellationToken,
+                { executionMode }
             );
+
+            if (mode === 'terminal') {
+                return new vscode.LanguageModelToolResult([
+                    new vscode.LanguageModelTextPart(
+                        'Command sent to the PromptHider terminal for interactive/background execution. No captured output is available in terminal mode.'
+                    )
+                ]);
+            }
 
             const summary = [
                 `Exit code: ${exitCode}`,
@@ -86,15 +104,23 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
     public async executeCommand(
         rawCommand: string,
         cancellationToken: vscode.CancellationToken,
-        options?: { mirrorToTerminal?: boolean }
-    ): Promise<{ exitCode: number; safeStdout: string; safeStderr: string }> {
+        options?: { executionMode?: ExecutionMode }
+    ): Promise<{ exitCode: number; safeStdout: string; safeStderr: string; mode: ExecutionMode }> {
         const realCommand = this.deAnonymize(rawCommand);
         console.log('[CommandExecutor] Executing (de-anonymized):', realCommand);
 
-        if (options?.mirrorToTerminal) {
+        const mode = options?.executionMode ?? this.getExecutionMode();
+
+        if (mode === 'terminal') {
             this.ensureTerminal();
             this.terminal!.show(true);
             this.terminal!.sendText(realCommand, true);
+            return {
+                exitCode: 0,
+                safeStdout: '',
+                safeStderr: '',
+                mode,
+            };
         }
 
         const result = await this.capture(realCommand, cancellationToken);
@@ -103,7 +129,14 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
             exitCode: result.exitCode,
             safeStdout: this.reAnonymize(result.stdout),
             safeStderr: this.reAnonymize(result.stderr),
+            mode,
         };
+    }
+
+    private getExecutionMode(): ExecutionMode {
+        const config = vscode.workspace.getConfiguration('prompthider', this.configurationScopeUri);
+        const configured = config.get<string>('agent.executionMode', 'captured');
+        return configured === 'terminal' ? 'terminal' : 'captured';
     }
 
     // ── Command classification ───────────────────────────

@@ -51,8 +51,7 @@ export class ScpTransferTool implements vscode.LanguageModelTool<ScpTransferInpu
             const { exitCode, safeStdout, safeStderr } =
                 await this.commandExecutor.executeCommand(
                     scpCommand,
-                    cancellationToken,
-                    { mirrorToTerminal: true }
+                    cancellationToken
                 );
 
             if (exitCode === 0) {
