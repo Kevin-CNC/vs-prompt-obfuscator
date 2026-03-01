@@ -10,7 +10,7 @@ export class MappingsViewProvider implements vscode.TreeDataProvider<MappingItem
     constructor(private tokenManager: TokenManager) {}
 
     refresh(): void {
-        this._onDidChangeTreeData.fire();
+        this._onDidChangeTreeData.fire(undefined);
     }
 
     getTreeItem(element: MappingItem): vscode.TreeItem {
@@ -18,9 +18,30 @@ export class MappingsViewProvider implements vscode.TreeDataProvider<MappingItem
     }
 
     getChildren(element?: MappingItem): Thenable<MappingItem[]> {
-        // TODO: Get mappings from TokenManager and convert to tree items
-        // TODO: Group by type (IPs, Emails, Secrets, etc.)
-        return Promise.resolve([]);
+        if (element) {
+            // No children below leaf items
+            return Promise.resolve([]);
+        }
+
+        // Root level: list all token → original mappings
+        const mappings = this.tokenManager.getAllMappings();
+        const items: MappingItem[] = [];
+
+        for (const [original, token] of mappings) {
+            items.push(new MappingItem(
+                token,
+                original,
+                vscode.TreeItemCollapsibleState.None
+            ));
+        }
+
+        if (items.length === 0) {
+            return Promise.resolve([
+                new MappingItem('No mappings yet', 'Use @PromptHider to create mappings', vscode.TreeItemCollapsibleState.None)
+            ]);
+        }
+
+        return Promise.resolve(items);
     }
 }
 
