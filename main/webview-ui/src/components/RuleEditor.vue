@@ -1,7 +1,28 @@
-﻿<template>
+<template>
   <div class="rule-editor-container">
+    <div class="search-bar-wrapper">
+      <vscode-text-field
+        :value="searchQuery"
+        @input="onSearchInput"
+        placeholder="Search patterns or replacements..."
+        class="search-bar"
+        aria-label="Search rules"
+      >
+        <span slot="start" class="codicon codicon-search"></span>
+      </vscode-text-field>
 
-    <!-- Rules table -->
+      <ul v-if="showSuggestions && filteredSuggestions.length > 0" class="autocomplete-list" role="listbox">
+        <li
+          v-for="(suggestion, idx) in filteredSuggestions"
+          :key="idx"
+          class="autocomplete-item"
+          @mousedown.prevent="applySuggestion(suggestion)"
+        >
+          {{ suggestion }}
+        </li>
+      </ul>
+    </div>
+
     <div class="rules-grid-wrapper">
       <div class="grid-header" aria-hidden="true">
         <div class="col-pattern">Pattern (Regex)</div>
@@ -9,7 +30,6 @@
         <div class="col-actions">Actions</div>
       </div>
 
-      <!-- Empty state -->
       <Transition name="fade">
         <div v-if="localRules.length === 0" class="empty-state">
           <span class="codicon codicon-filter" aria-hidden="true"></span>
@@ -18,16 +38,23 @@
         </div>
       </Transition>
 
+      <Transition name="fade">
+        <div v-if="localRules.length > 0 && filteredRules.length === 0" class="empty-state">
+          <span class="codicon codicon-search" aria-hidden="true"></span>
+          <p class="empty-title">No matches</p>
+          <p class="empty-sub">Try a different search term for pattern or replacement.</p>
+        </div>
+      </Transition>
+
       <TransitionGroup name="rule-row" tag="div" class="grid-body">
         <div
-          v-for="(rule, index) in localRules"
+          v-for="(rule, index) in filteredRules"
           :key="rule.id"
           class="grid-row"
           :class="{ 'row-dirty': dirtyIds.has(rule.id) }"
           role="row"
           :aria-label="`Rule ${index + 1}`"
         >
-          <!-- Dirty indicator bar (left edge) -->
           <span
             v-if="dirtyIds.has(rule.id)"
             class="dirty-bar"
@@ -38,7 +65,7 @@
           <div class="col-pattern">
             <vscode-text-field
               :value="rule.pattern"
-              @input="updateRule(index, 'pattern', ($event.target as HTMLInputElement).value)"
+              @input="updateRule(rule.id, 'pattern', ($event.target as HTMLInputElement).value)"
               placeholder="e.g., \b\d{1,3}(\.\d{1,3}){3}\b"
               class="field-full"
               aria-label="Pattern"
@@ -48,7 +75,7 @@
           <div class="col-replacement">
             <vscode-text-field
               :value="rule.replacement"
-              @input="updateRule(index, 'replacement', ($event.target as HTMLInputElement).value)"
+              @input="updateRule(rule.id, 'replacement', ($event.target as HTMLInputElement).value)"
               placeholder="e.g., IP_TOKEN"
               class="field-full"
               aria-label="Replacement token"
@@ -58,7 +85,7 @@
           <div class="col-actions">
             <vscode-button
               appearance="icon"
-              @click="saveSingleRule(index)"
+              @click="saveSingleRule(rule.id)"
               :title="dirtyIds.has(rule.id) ? 'Save this rule' : 'Rule saved'"
               aria-label="Save rule"
             >
@@ -66,7 +93,7 @@
             </vscode-button>
             <vscode-button
               appearance="icon"
-              @click="requestRemoveRule(index)"
+              @click="requestRemoveRule(rule.id)"
               title="Delete rule"
               aria-label="Delete rule"
               class="btn-danger"
@@ -78,7 +105,6 @@
       </TransitionGroup>
     </div>
 
-    <!-- Footer -->
     <div class="footer-actions">
       <vscode-button appearance="primary" @click="addRule">
         <span slot="start" class="codicon codicon-add"></span>
@@ -107,7 +133,6 @@
       </vscode-button>
     </div>
 
-    <!-- Toast notifications -->
     <div class="toast-region" aria-live="polite" aria-atomic="false">
       <TransitionGroup name="toast">
         <div
@@ -123,7 +148,6 @@
       </TransitionGroup>
     </div>
 
-    <!-- Delete Confirmation Dialog -->
     <Transition name="dialog">
       <div v-if="ruleToDelete" class="dialog-overlay" role="presentation" @click.self="cancelRemoveRule">
         <div
@@ -138,7 +162,7 @@
           </div>
           <h2 id="dialog-title" class="dialog-title">Delete Rule</h2>
           <p id="dialog-description" class="dialog-description">
-            Delete pattern <code class="pattern-preview">{{ ruleToDelete.rule.pattern || '(empty)' }}</code>?
+            Delete pattern <code class="pattern-preview">{{ ruleToDelete.pattern || '(empty)' }}</code>?
             This cannot be undone.
           </p>
           <div class="dialog-actions">
@@ -150,12 +174,11 @@
         </div>
       </div>
     </Transition>
-
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 export interface RuleRow {
   id: string;
@@ -187,10 +210,53 @@ const emit = defineEmits<{
 }>();
 
 const localRules = ref<RuleRow[]>([]);
-const ruleToDelete = ref<{ rule: RuleRow; index: number } | null>(null);
+const ruleToDelete = ref<RuleRow | null>(null);
 const dirtyIds = ref<Set<string>>(new Set());
 
-// Toast system
+const searchQuery = ref('');
+const showSuggestions = ref(false);
+const suggestions = ref<string[]>([]);
+
+const filteredSuggestions = computed(() => {
+  if (!searchQuery.value.trim()) return [];
+  const q = searchQuery.value.toLowerCase();
+  return suggestions.value.filter(s => s.toLowerCase().includes(q)).slice(0, 8);
+});
+
+const filteredRules = computed(() => {
+  if (!searchQuery.value.trim()) return localRules.value;
+  const q = searchQuery.value.toLowerCase();
+  return localRules.value.filter(r =>
+    r.pattern.toLowerCase().includes(q) || r.replacement.toLowerCase().includes(q)
+  );
+});
+
+watch([localRules, searchQuery], () => {
+  const q = searchQuery.value.trim().toLowerCase();
+  if (!q) {
+    suggestions.value = [];
+    return;
+  }
+
+  const allValues = [
+    ...localRules.value.map(r => r.pattern.trim()),
+    ...localRules.value.map(r => r.replacement.trim()),
+  ].filter(Boolean);
+
+  suggestions.value = Array.from(new Set(allValues)).filter(v => v.toLowerCase().includes(q));
+});
+
+function onSearchInput(event: Event) {
+  const value = (event.target as HTMLInputElement).value;
+  searchQuery.value = value;
+  showSuggestions.value = !!value.trim();
+}
+
+function applySuggestion(suggestion: string) {
+  searchQuery.value = suggestion;
+  showSuggestions.value = false;
+}
+
 const toasts = ref<Toast[]>([]);
 let toastCounter = 0;
 
@@ -202,10 +268,9 @@ function showToast(message: string, type: Toast['type'] = 'success') {
   }, 3500);
 }
 
-// Merge incoming prop changes, preserving dirty local edits
 watch(
   () => props.rules,
-  (newRules) => {
+  newRules => {
     const incoming: RuleRow[] = JSON.parse(JSON.stringify(newRules || []));
 
     if (localRules.value.length === 0) {
@@ -220,7 +285,7 @@ watch(
       return incomingMap.get(local.id) ?? local;
     });
 
-    for (const inc of (newRules || [])) {
+    for (const inc of newRules || []) {
       if (!merged.find(r => r.id === inc.id)) {
         merged.push(JSON.parse(JSON.stringify(inc)));
       }
@@ -231,16 +296,12 @@ watch(
   { immediate: true, deep: true }
 );
 
-// Watch for scanned rules arriving from the IaC scanner
-// Only add patterns that don't already exist in localRules (dedup by pattern string)
 watch(
   () => props.pendingScannedRules,
-  (scanned) => {
+  scanned => {
     if (!scanned || scanned.length === 0) return;
 
-    const existingPatterns = new Set(
-      localRules.value.map(r => r.pattern.trim())
-    );
+    const existingPatterns = new Set(localRules.value.map(r => r.pattern.trim()));
 
     let addedCount = 0;
     for (const sr of scanned) {
@@ -269,7 +330,7 @@ watch(
 
 watch(
   () => props.pendingImportedRules,
-  (imported) => {
+  imported => {
     if (!imported || imported.length === 0) return;
 
     const existingPatterns = new Set(localRules.value.map(r => r.pattern.trim()));
@@ -306,40 +367,46 @@ function generateId(): string {
 function addRule() {
   const newRule: RuleRow = { id: generateId(), pattern: '', replacement: '' };
   localRules.value.push(newRule);
-  // New unsaved rows are marked dirty immediately
   dirtyIds.value = new Set([...dirtyIds.value, newRule.id]);
 }
 
-function requestRemoveRule(index: number) {
-  const rule = localRules.value[index];
-  if (rule) ruleToDelete.value = { rule, index };
+function requestRemoveRule(ruleId: string) {
+  const rule = localRules.value.find(r => r.id === ruleId);
+  if (rule) {
+    ruleToDelete.value = rule;
+  }
 }
 
 function confirmRemoveRule() {
-  if (ruleToDelete.value !== null) {
-    const id = ruleToDelete.value.rule.id;
-    localRules.value.splice(ruleToDelete.value.index, 1);
-    const next = new Set(dirtyIds.value);
-    next.delete(id);
-    dirtyIds.value = next;
-    ruleToDelete.value = null;
-    emit('deleteRule', id);
+  if (!ruleToDelete.value) return;
+
+  const id = ruleToDelete.value.id;
+  const removeIndex = localRules.value.findIndex(r => r.id === id);
+  if (removeIndex !== -1) {
+    localRules.value.splice(removeIndex, 1);
   }
+
+  const next = new Set(dirtyIds.value);
+  next.delete(id);
+  dirtyIds.value = next;
+  ruleToDelete.value = null;
+  emit('deleteRule', id);
 }
 
 function cancelRemoveRule() {
   ruleToDelete.value = null;
 }
 
-function updateRule(index: number, field: 'pattern' | 'replacement', value: string) {
-  if (localRules.value[index]) {
-    localRules.value[index][field] = value;
-    dirtyIds.value = new Set([...dirtyIds.value, localRules.value[index].id]);
-  }
+function updateRule(ruleId: string, field: 'pattern' | 'replacement', value: string) {
+  const target = localRules.value.find(r => r.id === ruleId);
+  if (!target) return;
+
+  target[field] = value;
+  dirtyIds.value = new Set([...dirtyIds.value, target.id]);
 }
 
-function saveSingleRule(index: number) {
-  const rule = localRules.value[index];
+function saveSingleRule(ruleId: string) {
+  const rule = localRules.value.find(r => r.id === ruleId);
   if (!rule || (rule.pattern.trim() === '' && rule.replacement.trim() === '')) return;
 
   emit('saveSingleRule', {
@@ -376,7 +443,6 @@ function exportRules() {
 </script>
 
 <style scoped>
-/* â”€â”€â”€ Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .rule-editor-container {
   display: flex;
   flex-direction: column;
@@ -386,7 +452,42 @@ function exportRules() {
   position: relative;
 }
 
-/* â”€â”€â”€ Grid wrapper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.search-bar-wrapper {
+  position: relative;
+  padding: 12px 20px 8px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border);
+  background-color: var(--vscode-editor-background);
+}
+
+.search-bar {
+  width: 100%;
+}
+
+.autocomplete-list {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  top: 46px;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-editorWidget-border);
+  background-color: var(--vscode-editorWidget-background);
+  z-index: 20;
+}
+
+.autocomplete-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--vscode-editor-foreground);
+}
+
+.autocomplete-item:hover {
+  background-color: var(--vscode-list-hoverBackground);
+}
+
 .rules-grid-wrapper {
   flex: 1;
   overflow-y: auto;
@@ -395,7 +496,6 @@ function exportRules() {
   scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
 }
 
-/* â”€â”€â”€ Grid columns: pattern | replacement | 96px actions â”€â”€â”€ */
 .grid-header,
 .grid-row {
   display: grid;
@@ -438,7 +538,6 @@ function exportRules() {
   background-color: var(--vscode-list-hoverBackground);
 }
 
-/* â”€â”€â”€ Dirty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .dirty-bar {
   position: absolute;
   left: 0;
@@ -454,7 +553,6 @@ function exportRules() {
   background-color: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.04));
 }
 
-/* â”€â”€â”€ Column helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .col-pattern,
 .col-replacement {
   min-width: 0;
@@ -472,17 +570,16 @@ function exportRules() {
   display: block;
 }
 
-/* â”€â”€â”€ Danger button (trash) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .btn-danger::part(control) {
   color: var(--vscode-errorForeground);
   opacity: 0.75;
   transition: opacity 0.15s ease;
 }
+
 .btn-danger:hover::part(control) {
   opacity: 1;
 }
 
-/* â”€â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .footer-actions {
   flex-shrink: 0;
   display: flex;
@@ -494,7 +591,6 @@ function exportRules() {
   box-shadow: 0 -2px 8px -2px rgba(0, 0, 0, 0.15);
 }
 
-/* â”€â”€â”€ Empty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -528,7 +624,6 @@ function exportRules() {
   line-height: 1.5;
 }
 
-/* â”€â”€â”€ Toast region â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .toast-region {
   position: fixed;
   bottom: 56px;
@@ -565,7 +660,6 @@ function exportRules() {
   border: 1px solid var(--vscode-inputValidation-errorBorder);
 }
 
-/* â”€â”€â”€ Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .dialog-overlay {
   position: fixed;
   inset: 0;
@@ -626,65 +720,76 @@ function exportRules() {
   color: #fff;
 }
 
-/* â”€â”€â”€ Row enter/leave â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .rule-row-enter-active {
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
+
 .rule-row-leave-active {
   transition: opacity 0.18s ease, transform 0.18s ease;
   position: absolute;
   width: 100%;
 }
+
 .rule-row-enter-from {
   opacity: 0;
   transform: translateY(-6px);
 }
+
 .rule-row-leave-to {
   opacity: 0;
   transform: translateX(16px);
 }
+
 .rule-row-move {
   transition: transform 0.2s ease;
 }
 
-/* â”€â”€â”€ Toast enter/leave â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .toast-enter-active {
   transition: opacity 0.25s ease, transform 0.25s ease;
 }
+
 .toast-leave-active {
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
+
 .toast-enter-from {
   opacity: 0;
   transform: translateY(8px) scale(0.96);
 }
+
 .toast-leave-to {
   opacity: 0;
   transform: translateX(12px) scale(0.96);
 }
 
-/* â”€â”€â”€ Empty state fade â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-.fade-enter-active, .fade-leave-active {
+.fade-enter-active,
+.fade-leave-active {
   transition: opacity 0.2s ease;
 }
-.fade-enter-from, .fade-leave-to {
+
+.fade-enter-from,
+.fade-leave-to {
   opacity: 0;
 }
 
-/* â”€â”€â”€ Dialog enter/leave â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .dialog-enter-active {
   transition: opacity 0.2s ease;
 }
+
 .dialog-leave-active {
   transition: opacity 0.18s ease;
 }
-.dialog-enter-from, .dialog-leave-to {
+
+.dialog-enter-from,
+.dialog-leave-to {
   opacity: 0;
 }
+
 .dialog-enter-from .dialog-content,
 .dialog-leave-to .dialog-content {
   transform: scale(0.97) translateY(-6px);
 }
+
 .dialog-enter-active .dialog-content,
 .dialog-leave-active .dialog-content {
   transition: transform 0.2s ease;
