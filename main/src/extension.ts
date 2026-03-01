@@ -11,174 +11,315 @@ import { ScpTransferTool } from './tools/ScpTransferTool';
 import { IacScanner } from './scanner/IacScanner';
 import * as fs from 'fs';
 
-// Module-level reference for cleanup in deactivate().
 let commandExecutorInstance: CommandExecutor | undefined;
 
-function updateDevFiles(rulesheetRelativePath: string) {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) return;
-    const workspacePath = workspaceFolders[0].uri.fsPath;
+interface RulesheetSelection {
+    workspaceFolder: vscode.WorkspaceFolder;
+    fileUri: vscode.Uri;
+}
 
+function sanitizeRulesheetName(input: string | undefined): string {
+    const raw = (input ?? '').replace(/[/\\:*?"<>|]/g, '_').trim();
+    return raw || 'defaultSheet';
+}
+
+function updateDevFiles(workspacePath: string, rulesheetRelativePath: string): void {
     const ignoreFiles = [
         path.join(workspacePath, '.gitignore'),
         path.join(workspacePath, '.copilotignore')
     ];
 
     for (const ignoreFile of ignoreFiles) {
-        if (fs.existsSync(ignoreFile)) {
-            const cnt = fs.readFileSync(ignoreFile, 'utf8');
-            if (!cnt.includes(rulesheetRelativePath)) {
-                fs.appendFileSync(ignoreFile, `${rulesheetRelativePath}\n`);
-            }
+        if (!fs.existsSync(ignoreFile)) {
+            continue;
+        }
+
+        const content = fs.readFileSync(ignoreFile, 'utf8');
+        if (!content.includes(rulesheetRelativePath)) {
+            fs.appendFileSync(ignoreFile, `${rulesheetRelativePath}\n`);
         }
     }
-
-    vscode.window.showInformationMessage(`Rulesheet added to dev files.`);
 }
 
-export async function activate(context: vscode.ExtensionContext) {
-    console.log('The prompt hider is online.');
-    let selectedFile: vscode.Uri | undefined = undefined;
-    const prmptHidFiles = await vscode.workspace.findFiles('**/*.prompthider.json');
+async function pickWorkspaceFolder(
+    placeHolder: string,
+    preferredFolder?: vscode.WorkspaceFolder
+): Promise<vscode.WorkspaceFolder | undefined> {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) {
+        return undefined;
+    }
 
-    if (prmptHidFiles.length === 1) {
-        selectedFile = prmptHidFiles[0];
-        vscode.window.showInformationMessage(`Rulesheet found: ${path.basename(selectedFile.fsPath)}. Loading it for the session.`);
-    } else if (prmptHidFiles.length > 1) {
-        const items = prmptHidFiles.map(file => ({
-            label: vscode.workspace.asRelativePath(file),
-            description: file.fsPath,
-            fileUri: file
-        }));
+    if (workspaceFolders.length === 1) {
+        return workspaceFolders[0];
+    }
 
-        const picked = await vscode.window.showQuickPick(items, {
-            placeHolder: 'Multiple rules files found, please pick the one you want to use for the session.'
+    const items = workspaceFolders.map(folder => ({
+        label: folder.name,
+        description: folder.uri.fsPath,
+        folder,
+    }));
+
+    const picked = await vscode.window.showQuickPick(items, {
+        placeHolder,
+    });
+
+    if (picked) {
+        return picked.folder;
+    }
+
+    return preferredFolder ?? workspaceFolders[0];
+}
+
+async function findRulesheetsInWorkspace(folder: vscode.WorkspaceFolder): Promise<vscode.Uri[]> {
+    return vscode.workspace.findFiles(
+        new vscode.RelativePattern(folder, '**/*.prompthider.json')
+    );
+}
+
+async function createRulesheetInWorkspace(folder: vscode.WorkspaceFolder): Promise<vscode.Uri> {
+    const givenName = sanitizeRulesheetName(await vscode.window.showInputBox({
+        placeHolder: 'Enter your rule file name (Else press enter for default name).'
+    }));
+
+    const promptHiderFolder = path.join(folder.uri.fsPath, '.prompthider');
+    if (!fs.existsSync(promptHiderFolder)) {
+        fs.mkdirSync(promptHiderFolder, { recursive: true });
+    }
+
+    const newFilePath = path.join(promptHiderFolder, `${givenName}.prompthider.json`);
+    const selectedFile = vscode.Uri.file(newFilePath);
+
+    const defaultData = {
+        version: '0',
+        enabled: false,
+        rules: [],
+        tokenConsistency: false,
+        autoAnonymize: false,
+        showPreview: true
+    };
+
+    const content = Buffer.from(JSON.stringify(defaultData, null, 4), 'utf8');
+    await vscode.workspace.fs.writeFile(selectedFile, content);
+
+    const relPath = path.relative(folder.uri.fsPath, selectedFile.fsPath).replace(/\\/g, '/');
+    updateDevFiles(folder.uri.fsPath, relPath);
+
+    vscode.window.showInformationMessage(`Created rule file: ${path.basename(selectedFile.fsPath)}.`);
+    return selectedFile;
+}
+
+async function pickRulesheetInWorkspace(
+    folder: vscode.WorkspaceFolder,
+    allowCreate: boolean,
+    placeHolder: string
+): Promise<vscode.Uri | undefined> {
+    const rulesheets = await findRulesheetsInWorkspace(folder);
+
+    if (rulesheets.length === 0) {
+        if (!allowCreate) {
+            return undefined;
+        }
+        return createRulesheetInWorkspace(folder);
+    }
+
+    if (rulesheets.length === 1 && !allowCreate) {
+        return rulesheets[0];
+    }
+
+    const items: Array<{
+        label: string;
+        description: string;
+        fileUri?: vscode.Uri;
+        createNew?: boolean;
+    }> = rulesheets.map(file => ({
+        label: path.basename(file.fsPath),
+        description: vscode.workspace.asRelativePath(file, false),
+        fileUri: file,
+    }));
+
+    if (allowCreate) {
+        items.unshift({
+            label: '$(add) Create new rulesheet',
+            description: `Create under ${folder.name}/.prompthider`,
+            createNew: true,
         });
+    }
 
-        if (picked) {
-            selectedFile = picked.fileUri;
-        } else {
-            selectedFile = prmptHidFiles[0];
-            vscode.window.showInformationMessage(`No file picked, defaulting to the first one found: ${path.basename(selectedFile.fsPath)}.`);
+    const picked = await vscode.window.showQuickPick(items, { placeHolder });
+    if (!picked) {
+        return rulesheets[0];
+    }
+
+    if (picked.createNew) {
+        return createRulesheetInWorkspace(folder);
+    }
+
+    return picked.fileUri;
+}
+
+async function selectWorkspaceAndRulesheet(
+    allowCreate: boolean,
+    preferredFolder?: vscode.WorkspaceFolder
+): Promise<RulesheetSelection | undefined> {
+    const folder = await pickWorkspaceFolder(
+        'Pick the workspace folder for the active PromptHider session.',
+        preferredFolder
+    );
+    if (!folder) {
+        return undefined;
+    }
+
+    const fileUri = await pickRulesheetInWorkspace(
+        folder,
+        allowCreate,
+        `Pick the rulesheet to use in workspace '${folder.name}'.`
+    );
+
+    if (!fileUri) {
+        return undefined;
+    }
+
+    return { workspaceFolder: folder, fileUri };
+}
+
+function getConfigForFolder(folder: vscode.WorkspaceFolder): vscode.WorkspaceConfiguration {
+    return vscode.workspace.getConfiguration('prompthider', folder.uri);
+}
+
+function getMaxToolRounds(folder: vscode.WorkspaceFolder): number {
+    const configured = getConfigForFolder(folder).get<number>('agent.maxToolRounds', 20);
+    const normalized = Number.isFinite(configured) ? Math.floor(configured) : 20;
+    return Math.max(1, Math.min(100, normalized));
+}
+
+function shouldAutoClearOnSessionStart(folder: vscode.WorkspaceFolder): boolean {
+    return getConfigForFolder(folder).get<boolean>('mappings.autoClearOnSessionStart', true);
+}
+
+function shouldAutoClearOnRulesheetSwitch(folder: vscode.WorkspaceFolder): boolean {
+    return getConfigForFolder(folder).get<boolean>('mappings.autoClearOnRulesheetSwitch', true);
+}
+
+function getToolDefinitions(folder: vscode.WorkspaceFolder): vscode.LanguageModelChatTool[] {
+    const toolScope = getConfigForFolder(folder).get<string>('agent.toolScope', 'prompthiderOnly');
+    const visibleTools = toolScope === 'all'
+        ? vscode.lm.tools
+        : vscode.lm.tools.filter(t => t.name.startsWith('prompthider_'));
+
+    return visibleTools.map(t => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema ?? {}
+    }));
+}
+
+async function processFileReferences(
+    references: readonly vscode.ChatPromptReference[],
+    anonymizationEngine: AnonymizationEngine
+): Promise<string[]> {
+    const contextParts: string[] = [];
+
+    for (const ref of references) {
+        if (!(ref.value instanceof vscode.Uri)) {
+            continue;
         }
-    } else if (prmptHidFiles.length === 0) {
-        let givenName = await vscode.window.showInputBox({
-            placeHolder: 'Enter your rule file name (Else press enter for default name).'
-        });
 
-        if (givenName === undefined || givenName === '') {
-            givenName = 'defaultSheet';
-        }
-
-        givenName = givenName.replace(/[/\\:*?"<>|]/g, '_').trim();
-        if (!givenName) {
-            givenName = 'defaultSheet';
-        }
-
-        const workspaceFldrs = vscode.workspace.workspaceFolders;
-        if (workspaceFldrs && workspaceFldrs.length > 0) {
-            const workspaceUri = workspaceFldrs[0].uri;
-            const promptHiderFolder = path.join(workspaceUri.fsPath, '.prompthider');
-
-            if (!fs.existsSync(promptHiderFolder)) {
-                fs.mkdirSync(promptHiderFolder, { recursive: true });
-            }
-
-            const newFPath = path.join(promptHiderFolder, `${givenName}.prompthider.json`);
-            selectedFile = vscode.Uri.file(newFPath);
-
-            const defaultData = {
-                version: "0",
-                enabled: false,
-                rules: [],
-                tokenConsistency: false,
-                autoAnonymize: false,
-                showPreview: true
-            };
-            
-            const content = Buffer.from(JSON.stringify(defaultData, null, 4), 'utf8');
-            await vscode.workspace.fs.writeFile(selectedFile, content);
-
-            vscode.window.showInformationMessage(`Created rule file: ${path.basename(selectedFile.fsPath)} !`);
-
-            const relPath = path.relative(workspaceUri.fsPath, selectedFile.fsPath).replace(/\\/g, '/');
-            updateDevFiles(relPath);
+        try {
+            const bytes = await vscode.workspace.fs.readFile(ref.value);
+            const content = Buffer.from(bytes).toString('utf8');
+            const anonResult = await anonymizationEngine.anonymize(content);
+            const fileName = path.basename(ref.value.fsPath);
+            contextParts.push(
+                `[Attached file: ${fileName}]\n\`\`\`\n${anonResult.anonymized}\n\`\`\``
+            );
+        } catch {
+            // Skip unreadable attachments.
         }
     }
 
-    if (!selectedFile) {
+    return contextParts;
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    console.log('The prompt hider is online.');
+
+    const initialSelection = await selectWorkspaceAndRulesheet(true);
+    if (!initialSelection) {
         vscode.window.showErrorMessage('No rulesheet file selected or created.');
         return;
     }
 
+    let activeWorkspaceFolder = initialSelection.workspaceFolder;
+    let activeRulesheetUri = initialSelection.fileUri;
 
     const tokenManager = new TokenManager(context);
-    const configs = new ConfigManager(selectedFile.fsPath);
-    const anonymizationEngine = new AnonymizationEngine(tokenManager, configs);
-    const commandExecutor = new CommandExecutor(tokenManager);
-    commandExecutorInstance = commandExecutor;
-    const scpTransferTool = new ScpTransferTool(commandExecutor);
+    const configManager = new ConfigManager(activeRulesheetUri.fsPath);
+    const anonymizationEngine = new AnonymizationEngine(tokenManager, configManager);
 
-    // Create mappingsViewProvider early so the chat participant can refresh it.
+    const commandExecutor = new CommandExecutor(tokenManager);
+    commandExecutor.setConfigurationScope(activeWorkspaceFolder.uri);
+    commandExecutorInstance = commandExecutor;
+
+    const scpTransferTool = new ScpTransferTool(commandExecutor);
     const mappingsViewProvider = new MappingsViewProvider(tokenManager);
 
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
     statusBarItem.command = 'prompthider.openUI';
+    context.subscriptions.push(statusBarItem);
 
-    const updateStatusBar = async () => {
-        const loadedConfig = await configs.loadFullConfig();
+    const updateStatusBar = async (): Promise<void> => {
+        const loadedConfig = await configManager.loadFullConfig();
         const ruleCount = loadedConfig?.rules?.length ?? 0;
-        const rulesheetName = configs.getRulesheetName();
+        const rulesheetName = configManager.getRulesheetName();
+        const workspaceName = configManager.getWorkspaceFolderName();
 
-        statusBarItem.text = `$(shield) PromptHider: ${rulesheetName} (${ruleCount})`;
+        statusBarItem.text = `$(shield) PromptHider: ${workspaceName}/${rulesheetName} (${ruleCount})`;
         statusBarItem.tooltip =
             `Prompt Hider\n` +
+            `Workspace: ${workspaceName}\n` +
             `Rulesheet: ${rulesheetName}\n` +
             `Rules: ${ruleCount}\n\n` +
             `Anonymization is applied only when using the @PromptHider chat participant.`;
         statusBarItem.show();
     };
 
-    await updateStatusBar();
-    context.subscriptions.push(statusBarItem);
+    const ruleEditorProvider = new RuleEditorProvider(
+        vscode.Uri.file(context.extensionPath),
+        configManager,
+        updateStatusBar
+    );
+
+    const applyRulesheetSelection = async (
+        selection: RulesheetSelection,
+        reason: 'startup' | 'switch'
+    ): Promise<void> => {
+        const previousRulesheetPath = activeRulesheetUri.fsPath;
+        activeWorkspaceFolder = selection.workspaceFolder;
+        activeRulesheetUri = selection.fileUri;
+
+        configManager.setConfigFilePath(activeRulesheetUri.fsPath);
+        commandExecutor.setConfigurationScope(activeWorkspaceFolder.uri);
+
+        const isRulesheetChanged = previousRulesheetPath !== activeRulesheetUri.fsPath;
+        if (reason === 'startup' && shouldAutoClearOnSessionStart(activeWorkspaceFolder)) {
+            tokenManager.clearMappings();
+        }
+        if (reason === 'switch' && isRulesheetChanged && shouldAutoClearOnRulesheetSwitch(activeWorkspaceFolder)) {
+            tokenManager.clearMappings();
+        }
+
+        mappingsViewProvider.refresh();
+        await updateStatusBar();
+        ruleEditorProvider.setConfigManager(configManager);
+        mainUIProvider.refreshCurrentPanel();
+    };
+
+    await applyRulesheetSelection(initialSelection, 'startup');
 
     const toolDisposable = vscode.lm.registerTool('prompthider_execute_command', commandExecutor);
     const scpToolDisposable = vscode.lm.registerTool('prompthider_scp_transfer', scpTransferTool);
     context.subscriptions.push(toolDisposable, scpToolDisposable);
-
-    function getToolDefinitions(): vscode.LanguageModelChatTool[] {
-        return vscode.lm.tools
-            .filter(t => t.name.startsWith('prompthider_'))
-            .map(t => ({
-                name: t.name,
-                description: t.description,
-                inputSchema: t.inputSchema ?? {}
-            }));
-    }
-
-    // Reads each URI-based file reference, anonymizes its content, and returns
-    // formatted code-fence strings ready to be appended to a user message.
-    async function processFileReferences(
-        references: readonly vscode.ChatPromptReference[]
-    ): Promise<string[]> {
-        const contextParts: string[] = [];
-        for (const ref of references) {
-            if (ref.value instanceof vscode.Uri) {
-                try {
-                    const bytes = await vscode.workspace.fs.readFile(ref.value);
-                    const content = Buffer.from(bytes).toString('utf8');
-                    const anonResult = await anonymizationEngine.anonymize(content);
-                    const fileName = path.basename(ref.value.fsPath);
-                    contextParts.push(
-                        `[Attached file: ${fileName}]\n\`\`\`\n${anonResult.anonymized}\n\`\`\``
-                    );
-                } catch {
-                    // Unreadable file — skip silently
-                }
-            }
-        }
-        return contextParts;
-    }
 
     const chatParticipant = vscode.chat.createChatParticipant('prompthider', async (request, chatContext, stream, token) => {
         const userPrompt = request.prompt;
@@ -194,7 +335,7 @@ export async function activate(context: vscode.ExtensionContext) {
         for (const turn of chatContext.history) {
             if (turn instanceof vscode.ChatRequestTurn) {
                 const histResult = await anonymizationEngine.anonymize(turn.prompt);
-                const histFileParts = await processFileReferences(turn.references);
+                const histFileParts = await processFileReferences(turn.references, anonymizationEngine);
                 const histParts = histFileParts.length > 0
                     ? `${histResult.anonymized}\n\n${histFileParts.join('\n\n')}`
                     : histResult.anonymized;
@@ -205,14 +346,14 @@ export async function activate(context: vscode.ExtensionContext) {
                         part instanceof vscode.ChatResponseMarkdownPart)
                     .map(part => part.value.value)
                     .join('');
+
                 if (responseText) {
                     messages.push(vscode.LanguageModelChatMessage.Assistant(responseText));
                 }
             }
         }
 
-        // Process any file/script attachments on the current turn
-        const fileParts = await processFileReferences(request.references);
+        const fileParts = await processFileReferences(request.references, anonymizationEngine);
         if (fileParts.length > 0) {
             stream.markdown(`> **PromptHider**: ${fileParts.length} file(s) attached and anonymized.\n\n`);
         }
@@ -222,7 +363,6 @@ export async function activate(context: vscode.ExtensionContext) {
             : result.anonymized;
         messages.push(vscode.LanguageModelChatMessage.User(currentUserMessage));
 
-        // Inject active token names so the model uses them verbatim
         const activeTokens = tokenManager.getAllMappings();
         if (activeTokens.size > 0) {
             const tokenList = [...new Set(activeTokens.values())].join(', ');
@@ -230,23 +370,25 @@ export async function activate(context: vscode.ExtensionContext) {
                 vscode.LanguageModelChatMessage.User(
                     `[SYSTEM — PromptHider context]\n` +
                     `The following anonymized tokens are currently active: ${tokenList}.\n` +
-                    `When referring to these values or using the execute_command tool, use these EXACT token names as they appear above. ` +
-                    `Do NOT rename, reformat, or standardize them (e.g. do not change "lxcIP1" to "IP_1").\n` +
+                    `When referring to these values or using tools, use these EXACT token names as they appear above. ` +
+                    `Do NOT rename, reformat, or standardize them.\n` +
                     `Treat them as opaque identifiers.`
                 )
             );
         }
 
-        const toolDefs = getToolDefinitions();
-        const MAX_TOOL_ROUNDS = 10;
+        const toolDefs = getToolDefinitions(activeWorkspaceFolder);
+        const maxToolRounds = getMaxToolRounds(activeWorkspaceFolder);
+
         try {
             let continueLoop = true;
             let iterations = 0;
+
             while (continueLoop) {
                 continueLoop = false;
                 iterations++;
 
-                if (iterations > MAX_TOOL_ROUNDS) {
+                if (iterations > maxToolRounds) {
                     stream.markdown('\n\n> **PromptHider**: Reached maximum tool-call rounds. Stopping.\n');
                     break;
                 }
@@ -274,22 +416,22 @@ export async function activate(context: vscode.ExtensionContext) {
                     const toolResultParts: vscode.LanguageModelToolResultPart[] = [];
 
                     for (const part of assistantParts) {
-                        if (part instanceof vscode.LanguageModelToolCallPart) {
-                            console.log(`[PromptHider] Tool call: ${part.name}`, part.input);
-
-                            const toolResult = await vscode.lm.invokeTool(
-                                part.name,
-                                {
-                                    input: part.input,
-                                    toolInvocationToken: request.toolInvocationToken
-                                },
-                                token
-                            );
-
-                            toolResultParts.push(
-                                new vscode.LanguageModelToolResultPart(part.callId, toolResult.content)
-                            );
+                        if (!(part instanceof vscode.LanguageModelToolCallPart)) {
+                            continue;
                         }
+
+                        const toolResult = await vscode.lm.invokeTool(
+                            part.name,
+                            {
+                                input: part.input,
+                                toolInvocationToken: request.toolInvocationToken
+                            },
+                            token
+                        );
+
+                        toolResultParts.push(
+                            new vscode.LanguageModelToolResultPart(part.callId, toolResult.content)
+                        );
                     }
 
                     messages.push(vscode.LanguageModelChatMessage.User(toolResultParts));
@@ -303,116 +445,139 @@ export async function activate(context: vscode.ExtensionContext) {
                 throw err;
             }
         } finally {
-            // Always refresh the sidebar so it reflects the latest session mappings.
             mappingsViewProvider.refresh();
         }
     });
-    
+
     context.subscriptions.push(chatParticipant);
-    const ruleEditorProvider = new RuleEditorProvider(
-        vscode.Uri.file(context.extensionPath),
-        configs,
-        updateStatusBar
-    );
 
     vscode.window.registerTreeDataProvider('prompthider.mappingsView', mappingsViewProvider);
-    // Populate the tree immediately with any mappings already in workspaceState
-    // (persisted from a previous session against the same rulesheet).
     mappingsViewProvider.refresh();
     vscode.window.registerWebviewViewProvider(RuleEditorProvider.viewType, ruleEditorProvider);
 
-    const openWebUI = vscode.commands.registerCommand(
-        'prompthider.openUI',
-        () => {
-            mainUIProvider.show(context, configs, updateStatusBar);
+    const openWebUI = vscode.commands.registerCommand('prompthider.openUI', () => {
+        mainUIProvider.show(context, configManager, updateStatusBar);
+    });
+
+    const showMappingsCommand = vscode.commands.registerCommand('prompthider.showMappings', () => {
+        mappingsViewProvider.refresh();
+    });
+
+    const clearMappingsCommand = vscode.commands.registerCommand('prompthider.clearMappings', async () => {
+        const answer = await vscode.window.showWarningMessage(
+            'Are you sure you want to clear all token mappings?',
+            'Yes',
+            'No'
+        );
+        if (answer === 'Yes') {
+            tokenManager.clearMappings();
+            mappingsViewProvider.refresh();
+            vscode.window.showInformationMessage('Token mappings cleared');
+        }
+    });
+
+    const switchRulesheetCommand = vscode.commands.registerCommand('prompthider.switchRulesheet', async () => {
+        const selection = await selectWorkspaceAndRulesheet(true, activeWorkspaceFolder);
+        if (!selection) {
+            return;
+        }
+
+        await applyRulesheetSelection(selection, 'switch');
+        vscode.window.showInformationMessage(
+            `Active rulesheet switched to ${path.basename(selection.fileUri.fsPath)} in workspace ${selection.workspaceFolder.name}.`
+        );
+    });
+
+    const activateCommand = vscode.commands.registerCommand('prompthider.activate', async () => {
+        await vscode.commands.executeCommand('prompthider.switchRulesheet');
+    });
+
+    const anonymizeSelectionCommand = vscode.commands.registerCommand('prompthider.anonymize', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || editor.selection.isEmpty) {
+            vscode.window.showInformationMessage('Select text first to anonymize.');
+            return;
+        }
+
+        const selectedText = editor.document.getText(editor.selection);
+        const anonResult = await anonymizationEngine.anonymize(selectedText);
+
+        await editor.edit(editBuilder => {
+            editBuilder.replace(editor.selection, anonResult.anonymized);
         });
 
-    const showMappingsCommand = vscode.commands.registerCommand(
-        'prompthider.showMappings',
-        () => {
-            mappingsViewProvider.refresh();
-        }
-    );
+        mappingsViewProvider.refresh();
+    });
 
-    const clearMappingsCommand = vscode.commands.registerCommand(
-        'prompthider.clearMappings',
-        async () => {
-            const answer = await vscode.window.showWarningMessage(
-                'Are you sure you want to clear all token mappings?',
-                'Yes', 'No'
+    const openRuleEditorCommand = vscode.commands.registerCommand('prompthider.openRuleEditor', async () => {
+        await vscode.commands.executeCommand('workbench.view.extension.prompthider-sidebar');
+        await vscode.commands.executeCommand('prompthider.openUI');
+    });
+
+    const scanIacFileCommand = vscode.commands.registerCommand('prompthider.scanIacFile', async () => {
+        const fileUris = await vscode.window.showOpenDialog({
+            canSelectMany: false,
+            canSelectFolders: false,
+            canSelectFiles: true,
+            openLabel: 'Scan for Sensitive Patterns',
+            filters: {
+                'Infrastructure as Code': ['tf', 'tfvars', 'yml', 'yaml', 'json'],
+                'All Files': ['*'],
+            },
+        });
+
+        if (!fileUris || fileUris.length === 0) {
+            return;
+        }
+
+        const filePath = fileUris[0].fsPath;
+
+        try {
+            const scannedRules = await IacScanner.scanFile(filePath);
+
+            if (scannedRules.length === 0) {
+                vscode.window.showInformationMessage('No sensitive patterns detected in the selected file.');
+                return;
+            }
+
+            mainUIProvider.show(context, configManager, updateStatusBar);
+
+            setTimeout(() => {
+                mainUIProvider.postMessage({
+                    command: 'scannedRules',
+                    rules: scannedRules.map(r => ({
+                        id: r.id,
+                        pattern: r.pattern,
+                        replacement: r.replacement,
+                    })),
+                    fileName: path.basename(filePath),
+                });
+            }, 500);
+
+            vscode.window.showInformationMessage(
+                `Found ${scannedRules.length} potential pattern(s) in ${path.basename(filePath)}. Review and save in the UI.`
             );
-            if (answer === 'Yes') {
-                tokenManager.clearMappings();
-                mappingsViewProvider.refresh();
-                vscode.window.showInformationMessage('Token mappings cleared');
-            }
+        } catch (err) {
+            vscode.window.showErrorMessage(
+                `Failed to scan file: ${err instanceof Error ? err.message : 'Unknown error'}`
+            );
         }
-    );
-
-    const scanIacFileCommand = vscode.commands.registerCommand(
-        'prompthider.scanIacFile',
-        async () => {
-            const fileUris = await vscode.window.showOpenDialog({
-                canSelectMany: false,
-                canSelectFolders: false,
-                canSelectFiles: true,
-                openLabel: 'Scan for Sensitive Patterns',
-                filters: {
-                    'Infrastructure as Code': ['tf', 'tfvars', 'yml', 'yaml', 'json'],
-                    'All Files': ['*'],
-                },
-            });
-
-            if (!fileUris || fileUris.length === 0) { return; }
-
-            const filePath = fileUris[0].fsPath;
-
-            try {
-                const scannedRules = await IacScanner.scanFile(filePath);
-
-                if (scannedRules.length === 0) {
-                    vscode.window.showInformationMessage('No sensitive patterns detected in the selected file.');
-                    return;
-                }
-
-                // Ensure the main UI panel is open so we can push the rules into it
-                mainUIProvider.show(context, configs);
-
-                // Give the webview a moment to initialise if it was just created
-                setTimeout(() => {
-                    mainUIProvider.postMessage({
-                        command: 'scannedRules',
-                        rules: scannedRules.map(r => ({
-                            id: r.id,
-                            pattern: r.pattern,
-                            replacement: r.replacement,
-                        })),
-                        fileName: path.basename(filePath),
-                    });
-                }, 500);
-
-                vscode.window.showInformationMessage(
-                    `Found ${scannedRules.length} potential pattern(s) in ${path.basename(filePath)}. Review and save in the UI.`
-                );
-            } catch (err) {
-                vscode.window.showErrorMessage(
-                    `Failed to scan file: ${err instanceof Error ? err.message : 'Unknown error'}`
-                );
-            }
-        }
-    );
+    });
 
     context.subscriptions.push(
         openWebUI,
         showMappingsCommand,
         clearMappingsCommand,
+        switchRulesheetCommand,
+        activateCommand,
+        anonymizeSelectionCommand,
+        openRuleEditorCommand,
         scanIacFileCommand
     );
 }
 
-export function deactivate() {
+export function deactivate(): void {
     commandExecutorInstance?.dispose();
     commandExecutorInstance = undefined;
     console.log('VS Prompt Hider deactivated');
 }
-
