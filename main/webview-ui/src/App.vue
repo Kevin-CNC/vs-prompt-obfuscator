@@ -12,10 +12,21 @@
     <!-- Rule Editor -->
     <RuleEditor
       :rules="rules"
+      :pending-scanned-rules="pendingScannedRules"
       @save-rules="handleSaveRules"
       @save-single-rule="handleSaveSingleRule"
       @delete-rule="handleDeleteRule"
+      @scan-iac-file="handleScanIacFile"
+      @scanned-rules-consumed="pendingScannedRules = []"
     />
+
+    <!-- Loading overlay: shown until 'init' arrives from the extension host -->
+    <Transition name="loading-fade">
+      <div v-if="isLoading" class="loading-overlay" aria-label="Loading" role="status">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <span class="loading-text">Loading rules…</span>
+      </div>
+    </Transition>
   </main>
 </template>
 
@@ -37,6 +48,7 @@ const vscode = acquireVsCodeApi();
 
 const rulesheetName = ref('Loading...');
 const enabled = ref(false);
+const isLoading = ref(true);
 
 interface SimpleRule {
   id: string;
@@ -65,6 +77,13 @@ function handleDeleteRule(ruleId: string) {
   vscode.postMessage({ command: 'deleteRule', id: ruleId });
 }
 
+function handleScanIacFile() {
+  vscode.postMessage({ command: 'scanIacFile' });
+}
+
+/** Ref passed down to RuleEditor when scanned rules arrive */
+const pendingScannedRules = ref<SimpleRule[]>([]);
+
 window.addEventListener('message', (event) => {
   const msg = event.data;
   switch (msg.command) {
@@ -72,9 +91,13 @@ window.addEventListener('message', (event) => {
       rulesheetName.value = msg.rulesheetName ?? 'Unknown';
       rules.value = msg.rules ?? [];
       enabled.value = msg.enabled ?? false;
+      isLoading.value = false;
       break;
     case 'enabledUpdated':
       enabled.value = msg.enabled;
+      break;
+    case 'scannedRules':
+      pendingScannedRules.value = msg.rules ?? [];
       break;
   }
 });
@@ -91,6 +114,7 @@ onMounted(() => {
   height: 100vh;
   box-sizing: border-box;
   overflow: hidden;
+  position: relative;
 }
 
 .header {
@@ -135,5 +159,45 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ─── Loading overlay ─────────────────────────────────────── */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background-color: var(--vscode-editor-background);
+  z-index: 500;
+}
+
+.loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--vscode-editorGroup-border);
+  border-top-color: var(--vscode-textLink-foreground);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+  letter-spacing: 0.02em;
+}
+
+/* Only a leave transition — the overlay is present immediately on mount */
+.loading-fade-leave-active {
+  transition: opacity 0.35s ease;
+}
+.loading-fade-leave-to {
+  opacity: 0;
 }
 </style>

@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as os from 'os';
+import * as path from 'path';
 import { TokenManager } from '../anonymizer/TokenManager';
 
 export interface CommandInput {
@@ -12,12 +14,28 @@ interface ExecutionResult {
     exitCode: number;
 }
 
+/** Command classification for adaptive timeout and flag injection. */
+type CommandType = 'ssh' | 'scp' | 'sftp' | 'local';
+
 export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
     private terminal: vscode.Terminal | undefined;
-    private static readonly TIMEOUT_MS = 30_000;
-    private static readonly MAX_BUFFER = 512 * 1024;
+
+    // ── Adaptive timeouts ────────────────────────────────
+    private static readonly LOCAL_TIMEOUT_MS  = 30_000;   // 30 s — local commands
+    private static readonly REMOTE_TIMEOUT_MS = 120_000;  // 120 s — SSH / SCP / SFTP
+    private static readonly MAX_BUFFER        = 1024 * 1024; // 1 MB
+
+    // ── SSH session persistence (Unix only) ──────────────
+    // ControlMaster reuses a single TCP connection for all SSH invocations to the
+    // same host:port:user tuple. ControlPersist keeps the master alive N seconds
+    // after the last client disconnects, avoiding repeated key exchanges.
+    // Windows OpenSSH does not support Unix-domain control sockets so this is
+    // transparently skipped on win32.
+    private static readonly SSH_CONTROL_PERSIST_SECS = 300;
 
     constructor(private readonly tokenManager: TokenManager) {}
+
+    // ── Tool interface (LanguageModelTool) ────────────────
 
     async invoke(
         options: vscode.LanguageModelToolInvocationOptions<CommandInput>,
@@ -31,81 +49,166 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
             ]);
         }
 
-        const realCommand = this.deAnonymize(rawCommand);
-        console.log('[CommandExecutor] Executing (de-anonymized):', realCommand);
-
-        this.ensureTerminal();
-        this.terminal!.show(true);
-        this.terminal!.sendText(realCommand, true);
-
-        let result: ExecutionResult;
         try {
-            result = await this.capture(realCommand, cancellationToken);
+            const { exitCode, safeStdout, safeStderr } = await this.executeCommand(
+                rawCommand, cancellationToken, { mirrorToTerminal: true }
+            );
+
+            const summary = [
+                `Exit code: ${exitCode}`,
+                safeStdout ? `\nOutput:\n${safeStdout}` : '',
+                safeStderr ? `\nErrors:\n${safeStderr}` : ''
+            ].join('');
+
+            return new vscode.LanguageModelToolResult([
+                new vscode.LanguageModelTextPart(summary)
+            ]);
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             return new vscode.LanguageModelToolResult([
                 new vscode.LanguageModelTextPart(`Execution error: ${msg}`)
             ]);
         }
-
-        const safeStdout = this.reAnonymize(result.stdout);
-        const safeStderr = this.reAnonymize(result.stderr);
-
-        const summary = [
-            `Exit code: ${result.exitCode}`,
-            safeStdout ? `\nOutput:\n${safeStdout}` : '',
-            safeStderr ? `\nErrors:\n${safeStderr}` : ''
-        ].join('');
-
-        return new vscode.LanguageModelToolResult([
-            new vscode.LanguageModelTextPart(summary)
-        ]);
     }
 
-    private ensureTerminal(): void {
-        if (!this.terminal || this.terminal.exitStatus !== undefined) {
-            this.terminal = vscode.window.createTerminal('PromptHider');
-        }
-    }
+    // ── Public API (used by invoke() and by other tools) ──
 
     /**
-     * Prepare a command for non-interactive execution.
-     * SSH commands get `-T -o BatchMode=yes` so they fail fast on
-     * host-key / password prompts instead of hanging without a PTY.
+     * Execute a shell command with full anonymization round-trip.
+     *   1. De-anonymize the command (tokens → real values)
+     *   2. Optionally mirror the real command to the PromptHider terminal
+     *   3. Run via child_process.exec with adaptive timeout
+     *   4. Re-anonymize stdout / stderr (real values → tokens)
+     *
+     * Other tools (e.g. ScpTransferTool) call this instead of re-implementing
+     * the capture + anonymization pipeline.
      */
-    private prepareForCapture(command: string): string {
-        const trimmed = command.trimStart();
+    public async executeCommand(
+        rawCommand: string,
+        cancellationToken: vscode.CancellationToken,
+        options?: { mirrorToTerminal?: boolean }
+    ): Promise<{ exitCode: number; safeStdout: string; safeStderr: string }> {
+        const realCommand = this.deAnonymize(rawCommand);
+        console.log('[CommandExecutor] Executing (de-anonymized):', realCommand);
 
-        // Match `ssh` at the start, optionally preceded by env vars (VAR=val)
-        if (/^(?:\S+=\S+\s+)*ssh\s/i.test(trimmed)) {
-            return trimmed.replace(
-                /^((?:\S+=\S+\s+)*ssh)\s/i,
-                '$1 -T -o BatchMode=yes '
+        if (options?.mirrorToTerminal) {
+            this.ensureTerminal();
+            this.terminal!.show(true);
+            this.terminal!.sendText(realCommand, true);
+        }
+
+        const result = await this.capture(realCommand, cancellationToken);
+
+        return {
+            exitCode: result.exitCode,
+            safeStdout: this.reAnonymize(result.stdout),
+            safeStderr: this.reAnonymize(result.stderr),
+        };
+    }
+
+    // ── Command classification ───────────────────────────
+
+    /** Classify a command string to determine timeout and flag injection. */
+    private classifyCommand(command: string): CommandType {
+        const trimmed = command.trimStart();
+        if (/^(?:\S+=\S+\s+)*ssh\s/i.test(trimmed))  { return 'ssh'; }
+        if (/^(?:\S+=\S+\s+)*scp\s/i.test(trimmed))  { return 'scp'; }
+        if (/^(?:\S+=\S+\s+)*sftp\s/i.test(trimmed)) { return 'sftp'; }
+        return 'local';
+    }
+
+    /** Return the appropriate timeout for a command type. */
+    private getTimeout(type: CommandType): number {
+        return type === 'local'
+            ? CommandExecutor.LOCAL_TIMEOUT_MS
+            : CommandExecutor.REMOTE_TIMEOUT_MS;
+    }
+
+    // ── Command preparation ──────────────────────────────
+
+    /**
+     * Prepare a command for non-interactive, captured execution.
+     *
+     * - **SSH**: injects `-T` (no PTY) + `-o BatchMode=yes` (fail-fast on
+     *   password / host-key prompts) + ControlMaster options on Unix for
+     *   session reuse across tool calls.
+     * - **SCP / SFTP**: injects `-o BatchMode=yes` + ControlMaster on Unix.
+     *   Does NOT inject `-T` (not a valid flag for scp/sftp).
+     * - **Local**: returned as-is.
+     */
+    private prepareForCapture(command: string, type: CommandType): string {
+        if (type === 'local') { return command; }
+
+        const trimmed = command.trimStart();
+        const sshOpts: string[] = [];
+
+        // -T disables pseudo-terminal allocation — valid for `ssh` only
+        if (type === 'ssh') {
+            sshOpts.push('-T');
+        }
+
+        // Fail-fast on password / host-key prompts instead of hanging
+        sshOpts.push('-o', 'BatchMode=yes');
+
+        // SSH ControlMaster for session reuse (Unix only — Windows OpenSSH
+        // does not support Unix-domain control sockets).
+        if (process.platform !== 'win32') {
+            const controlPath = path.join(
+                os.tmpdir(),
+                'prompthider_ssh_%h_%p_%r'
+            );
+            sshOpts.push(
+                '-o', 'ControlMaster=auto',
+                '-o', `ControlPath=${controlPath}`,
+                '-o', `ControlPersist=${CommandExecutor.SSH_CONTROL_PERSIST_SECS}`
             );
         }
 
-        return command;
+        const optsStr = sshOpts.join(' ');
+
+        // Inject options right after the command name (ssh / scp / sftp),
+        // preserving any leading env-var assignments (VAR=val ssh ...).
+        return trimmed.replace(
+            new RegExp(`^((?:\\S+=\\S+\\s+)*${type})\\s`, 'i'),
+            `$1 ${optsStr} `
+        );
     }
+
+    // ── Execution ────────────────────────────────────────
 
     private capture(
         command: string,
         cancellationToken: vscode.CancellationToken
     ): Promise<ExecutionResult> {
-        const prepared = this.prepareForCapture(command);
+        const type    = this.classifyCommand(command);
+        const timeout = this.getTimeout(type);
+        const prepared = this.prepareForCapture(command, type);
 
         return new Promise((resolve, reject) => {
             const proc = cp.exec(
                 prepared,
-                { timeout: CommandExecutor.TIMEOUT_MS, maxBuffer: CommandExecutor.MAX_BUFFER },
+                { timeout, maxBuffer: CommandExecutor.MAX_BUFFER },
                 (error, stdout, stderr) => {
+                    let exitCode = 0;
+                    let stderrStr = stderr.trim();
+
+                    if (error) {
+                        exitCode = typeof error.code === 'number' ? error.code : 1;
+                        if (error.killed) {
+                            // Process was killed — either by our timeout or an external signal.
+                            stderrStr = `${stderrStr}\n[Process terminated — exceeded ${timeout / 1000}s timeout]`.trim();
+                        }
+                    }
+
                     resolve({
                         stdout: stdout.trim(),
-                        stderr: stderr.trim(),
-                        exitCode: error?.code ?? (error ? 1 : 0)
+                        stderr: stderrStr,
+                        exitCode,
                     });
                 }
             );
 
+            // Close stdin immediately — we never send interactive input via exec.
             proc.stdin?.end();
 
             const cancelDisposable = cancellationToken.onCancellationRequested(() => {
@@ -121,8 +224,18 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
         });
     }
 
+    // ── Terminal management ──────────────────────────────
+
+    private ensureTerminal(): void {
+        if (!this.terminal || this.terminal.exitStatus !== undefined) {
+            this.terminal = vscode.window.createTerminal('PromptHider');
+        }
+    }
+
+    // ── Anonymization helpers ────────────────────────────
+
     /** Replace anonymized tokens with real values (longest-first). */
-    deAnonymize(text: string): string {
+    public deAnonymize(text: string): string {
         const reverse = this.tokenManager.getReverseMappings();
         const sorted = [...reverse.keys()].sort((a, b) => b.length - a.length);
 
@@ -135,7 +248,7 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
     }
 
     /** Replace real values with tokens in command output before returning to model. */
-    private reAnonymize(text: string): string {
+    public reAnonymize(text: string): string {
         if (!text) { return text; }
 
         const forward = this.tokenManager.getAllMappings();
@@ -151,5 +264,23 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
 
     private escapeRegex(str: string): string {
         return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    // ── Cleanup ──────────────────────────────────────────
+
+    /**
+     * Clean up SSH ControlMaster sockets (Unix only).
+     * Called when the extension is deactivated.
+     * Sockets also auto-expire after SSH_CONTROL_PERSIST_SECS of inactivity.
+     */
+    public dispose(): void {
+        if (process.platform === 'win32') { return; }
+
+        try {
+            const controlPattern = path.join(os.tmpdir(), 'prompthider_ssh_*');
+            cp.execSync(`rm -f ${controlPattern}`, { timeout: 5_000 });
+        } catch {
+            // Best-effort — sockets will auto-expire via ControlPersist anyway.
+        }
     }
 }
