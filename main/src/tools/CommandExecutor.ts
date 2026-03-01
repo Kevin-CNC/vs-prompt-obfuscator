@@ -3,6 +3,7 @@ import * as cp from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 import { TokenManager } from '../anonymizer/TokenManager';
+import { PromptHiderLogger } from '../utils/PromptHiderLogger';
 
 export interface CommandInput {
     command: string;
@@ -14,6 +15,15 @@ interface ExecutionResult {
     stdout: string;
     stderr: string;
     exitCode: number;
+}
+
+class InteractiveCommandError extends Error {
+    constructor(readonly reason: string) {
+        super(
+            `Interactive input is required (${reason}). Switch 'prompthider.agent.executionMode' to 'terminal' or run the command directly in the PromptHider terminal.`
+        );
+        this.name = 'InteractiveCommandError';
+    }
 }
 
 /** Command classification for adaptive timeout and flag injection. */
@@ -58,6 +68,10 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
 
         try {
             const executionMode = this.getExecutionMode();
+            PromptHiderLogger.debug('Tool command invocation requested.', {
+                executionMode,
+                commandPreview: rawCommand,
+            });
             const { exitCode, safeStdout, safeStderr, mode } = await this.executeCommand(
                 rawCommand,
                 cancellationToken,
@@ -83,6 +97,10 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
             ]);
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
+            PromptHiderLogger.error('Command tool invocation failed.', {
+                error: msg,
+                commandPreview: rawCommand,
+            });
             return new vscode.LanguageModelToolResult([
                 new vscode.LanguageModelTextPart(`Execution error: ${msg}`)
             ]);
@@ -107,14 +125,25 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
         options?: { executionMode?: ExecutionMode }
     ): Promise<{ exitCode: number; safeStdout: string; safeStderr: string; mode: ExecutionMode }> {
         const realCommand = this.deAnonymize(rawCommand);
-        console.log('[CommandExecutor] Executing (de-anonymized):', realCommand);
+        const interactiveReason = this.detectInteractiveReason(realCommand);
 
         const mode = options?.executionMode ?? this.getExecutionMode();
+
+        if (mode === 'captured' && interactiveReason) {
+            PromptHiderLogger.warn('Blocked interactive command in captured mode.', {
+                reason: interactiveReason,
+                commandPreview: rawCommand,
+            });
+            throw new InteractiveCommandError(interactiveReason);
+        }
 
         if (mode === 'terminal') {
             this.ensureTerminal();
             this.terminal!.show(true);
             this.terminal!.sendText(realCommand, true);
+            PromptHiderLogger.info('Command handed off to PromptHider terminal.', {
+                commandPreview: rawCommand,
+            });
             return {
                 exitCode: 0,
                 safeStdout: '',
@@ -124,6 +153,10 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
         }
 
         const result = await this.capture(realCommand, cancellationToken);
+        PromptHiderLogger.info('Captured command completed.', {
+            exitCode: result.exitCode,
+            commandPreview: rawCommand,
+        });
 
         return {
             exitCode: result.exitCode,
@@ -231,6 +264,10 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
                             // Process was killed — either by our timeout or an external signal.
                             stderrStr = `${stderrStr}\n[Process terminated — exceeded ${timeout / 1000}s timeout]`.trim();
                         }
+                        PromptHiderLogger.warn('Command completed with execution error.', {
+                            exitCode,
+                            timeoutMs: timeout,
+                        });
                     }
 
                     resolve({
@@ -247,6 +284,7 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
             const cancelDisposable = cancellationToken.onCancellationRequested(() => {
                 proc.kill();
                 cancelDisposable.dispose();
+                PromptHiderLogger.warn('Command cancelled by user or model cancellation token.');
                 reject(new Error('Command cancelled.'));
             });
 
@@ -263,6 +301,29 @@ export class CommandExecutor implements vscode.LanguageModelTool<CommandInput> {
         if (!this.terminal || this.terminal.exitStatus !== undefined) {
             this.terminal = vscode.window.createTerminal('PromptHider');
         }
+    }
+
+    private detectInteractiveReason(command: string): string | undefined {
+        const trimmed = command.trim();
+
+        const checks: Array<{ pattern: RegExp; reason: string }> = [
+            { pattern: /^(?:\S+=\S+\s+)*sudo\b/i, reason: 'sudo often requests a password' },
+            { pattern: /^(?:\S+=\S+\s+)*ssh\b/i, reason: 'ssh may require host-key or password confirmation' },
+            { pattern: /^(?:\S+=\S+\s+)*sftp\b/i, reason: 'sftp sessions are interactive by design' },
+            { pattern: /\b(read|select)\b/i, reason: 'shell read/select expects stdin input' },
+            { pattern: /\b(passwd|mysql\s+-p|psql\s+[^\n]*-W)\b/i, reason: 'database/account tooling requests secure prompts' },
+            { pattern: /\b(tail\s+-f|watch\b|less\b|vim\b|nano\b)\b/i, reason: 'command is long-running or interactive' },
+            { pattern: /\b(git\s+(push|pull|fetch|clone))\b/i, reason: 'git may request credentials or host confirmation' },
+            { pattern: /\b(docker\s+exec\s+-it|kubectl\s+exec\s+-it|kubectl\s+attach|kubectl\s+port-forward)\b/i, reason: 'tty/interactive session requested' },
+        ];
+
+        for (const check of checks) {
+            if (check.pattern.test(trimmed)) {
+                return check.reason;
+            }
+        }
+
+        return undefined;
     }
 
     // ── Anonymization helpers ────────────────────────────
