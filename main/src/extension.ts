@@ -9,6 +9,7 @@ import { MappingsViewProvider } from './ui/MappingsViewProvider';
 import { CommandExecutor } from './tools/CommandExecutor';
 import { ScpTransferTool } from './tools/ScpTransferTool';
 import { IacScanner } from './scanner/IacScanner';
+import { PromptHiderLogger } from './utils/PromptHiderLogger';
 import * as fs from 'fs';
 
 let commandExecutorInstance: CommandExecutor | undefined;
@@ -233,8 +234,11 @@ async function processFileReferences(
             contextParts.push(
                 `[Attached file: ${fileName}]\n\`\`\`\n${anonResult.anonymized}\n\`\`\``
             );
-        } catch {
-            // Skip unreadable attachments.
+        } catch (error) {
+            PromptHiderLogger.warn('Skipping unreadable or non-anonymizable attachment.', {
+                filePath: ref.value.fsPath,
+                reason: error instanceof Error ? error.message : String(error)
+            });
         }
     }
 
@@ -253,6 +257,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     let activeWorkspaceFolder = initialSelection.workspaceFolder;
     let activeRulesheetUri = initialSelection.fileUri;
 
+    PromptHiderLogger.setWorkspaceRoot(activeWorkspaceFolder.uri.fsPath);
+    PromptHiderLogger.configure(activeWorkspaceFolder.uri);
+    PromptHiderLogger.info('PromptHider activating.', {
+        workspace: activeWorkspaceFolder.name,
+        rulesheet: path.basename(activeRulesheetUri.fsPath),
+    });
+
     const tokenManager = new TokenManager(context);
     const configManager = new ConfigManager(activeRulesheetUri.fsPath);
     const anonymizationEngine = new AnonymizationEngine(tokenManager, configManager);
@@ -267,19 +278,46 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
     statusBarItem.command = 'prompthider.openUI';
     context.subscriptions.push(statusBarItem);
+    let lastOperationalIssue: { level: 'error' | 'warn'; message: string } | undefined;
+
+    const reportOperationalIssue = (
+        level: 'error' | 'warn',
+        message: string,
+        details?: Record<string, unknown>
+    ): void => {
+        if (level === 'error') {
+            PromptHiderLogger.error(message, details);
+        } else {
+            PromptHiderLogger.warn(message, details);
+        }
+
+        lastOperationalIssue = { level, message };
+        void updateStatusBar();
+
+        mainUIProvider.postMessage({
+            command: 'errorNotice',
+            level,
+            message,
+        });
+    };
 
     const updateStatusBar = async (): Promise<void> => {
         const loadedConfig = await configManager.loadFullConfig();
         const ruleCount = loadedConfig?.rules?.length ?? 0;
         const rulesheetName = configManager.getRulesheetName();
         const workspaceName = configManager.getWorkspaceFolderName();
+        const issuePrefix = lastOperationalIssue
+            ? (lastOperationalIssue.level === 'error' ? '$(error) ' : '$(warning) ')
+            : '';
 
-        statusBarItem.text = `$(shield) PromptHider: ${workspaceName}/${rulesheetName} (${ruleCount})`;
+        statusBarItem.text = `${issuePrefix}$(shield) PromptHider: ${workspaceName}/${rulesheetName} (${ruleCount})`;
         statusBarItem.tooltip =
             `Prompt Hider\n` +
             `Workspace: ${workspaceName}\n` +
             `Rulesheet: ${rulesheetName}\n` +
-            `Rules: ${ruleCount}\n\n` +
+            `Rules: ${ruleCount}\n` +
+            (lastOperationalIssue ? `Last issue: ${lastOperationalIssue.message}\n` : '') +
+            `\n` +
             `Anonymization is applied only when using the @PromptHider chat participant.`;
         statusBarItem.show();
     };
@@ -300,14 +338,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         configManager.setConfigFilePath(activeRulesheetUri.fsPath);
         commandExecutor.setConfigurationScope(activeWorkspaceFolder.uri);
+        PromptHiderLogger.setWorkspaceRoot(activeWorkspaceFolder.uri.fsPath);
+        PromptHiderLogger.configure(activeWorkspaceFolder.uri);
 
         const isRulesheetChanged = previousRulesheetPath !== activeRulesheetUri.fsPath;
         if (reason === 'startup' && shouldAutoClearOnSessionStart(activeWorkspaceFolder)) {
             tokenManager.clearMappings();
+            PromptHiderLogger.info('Token mappings auto-cleared on session start.', {
+                workspace: activeWorkspaceFolder.name,
+            });
         }
         if (reason === 'switch' && isRulesheetChanged && shouldAutoClearOnRulesheetSwitch(activeWorkspaceFolder)) {
             tokenManager.clearMappings();
+            PromptHiderLogger.info('Token mappings auto-cleared on rulesheet switch.', {
+                workspace: activeWorkspaceFolder.name,
+                rulesheet: path.basename(activeRulesheetUri.fsPath),
+            });
         }
+
+        lastOperationalIssue = undefined;
 
         mappingsViewProvider.refresh();
         await updateStatusBar();
@@ -323,7 +372,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     const chatParticipant = vscode.chat.createChatParticipant('prompthider', async (request, chatContext, stream, token) => {
         const userPrompt = request.prompt;
-        const result = await anonymizationEngine.anonymize(userPrompt);
+        let result;
+        try {
+            result = await anonymizationEngine.anonymize(userPrompt);
+        } catch (error) {
+            reportOperationalIssue(
+                'error',
+                'Prompt anonymization failed. Request was not sent to the model.',
+                { reason: error instanceof Error ? error.message : String(error) }
+            );
+            stream.markdown('**PromptHider error**: Failed to anonymize your prompt safely. The request was stopped to avoid exposing raw sensitive values.');
+            return;
+        }
 
         if (result.stats.totalMatches > 0) {
             stream.markdown(`> **PromptHider**: ${result.stats.totalMatches} pattern(s) anonymized before sending.\n\n`);
@@ -334,7 +394,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         for (const turn of chatContext.history) {
             if (turn instanceof vscode.ChatRequestTurn) {
-                const histResult = await anonymizationEngine.anonymize(turn.prompt);
+                let histResult;
+                try {
+                    histResult = await anonymizationEngine.anonymize(turn.prompt);
+                } catch (error) {
+                    reportOperationalIssue(
+                        'warn',
+                        'Skipped a prior chat turn because anonymization failed.',
+                        { reason: error instanceof Error ? error.message : String(error) }
+                    );
+                    continue;
+                }
                 const histFileParts = await processFileReferences(turn.references, anonymizationEngine);
                 const histParts = histFileParts.length > 0
                     ? `${histResult.anonymized}\n\n${histFileParts.join('\n\n')}`
@@ -420,18 +490,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                             continue;
                         }
 
-                        const toolResult = await vscode.lm.invokeTool(
-                            part.name,
-                            {
-                                input: part.input,
-                                toolInvocationToken: request.toolInvocationToken
-                            },
-                            token
-                        );
+                        try {
+                            const toolResult = await vscode.lm.invokeTool(
+                                part.name,
+                                {
+                                    input: part.input,
+                                    toolInvocationToken: request.toolInvocationToken
+                                },
+                                token
+                            );
 
-                        toolResultParts.push(
-                            new vscode.LanguageModelToolResultPart(part.callId, toolResult.content)
-                        );
+                            toolResultParts.push(
+                                new vscode.LanguageModelToolResultPart(part.callId, toolResult.content)
+                            );
+                        } catch (error) {
+                            const message = error instanceof Error ? error.message : String(error);
+                            reportOperationalIssue('error', `Tool execution failed for ${part.name}.`, {
+                                toolName: part.name,
+                                reason: message,
+                            });
+                            toolResultParts.push(
+                                new vscode.LanguageModelToolResultPart(part.callId, [
+                                    new vscode.LanguageModelTextPart(
+                                        `Tool execution failed: ${message}`
+                                    )
+                                ])
+                            );
+                        }
                     }
 
                     messages.push(vscode.LanguageModelChatMessage.User(toolResultParts));
