@@ -1,6 +1,7 @@
 import { TokenManager } from './TokenManager';
 import { ConfigManager } from '../utils/ConfigManager';
 import { RegexPatternMatcher, type PatternMatch } from './patternMatcher';
+import { PromptHiderLogger } from '../utils/PromptHiderLogger';
 
 export interface AnonymizationResult {
     original: string;
@@ -31,44 +32,52 @@ export class AnonymizationEngine {
     }
 
     async anonymize(text: string): Promise<AnonymizationResult> {
-        // Reload patterns fresh so any rule changes are picked up
-        this.initializePatterns();
+        try {
+            // Reload patterns fresh so any rule changes are picked up
+            this.initializePatterns();
 
-        // Find all pattern matches
-        const matches = this.patternMatcher.findMatches(text);
-        const mappings = new Map<string, string>();
-        const patternBreakdown: Record<string, number> = {};
+            // Find all pattern matches
+            const matches = this.patternMatcher.findMatches(text);
+            const mappings = new Map<string, string>();
+            const patternBreakdown: Record<string, number> = {};
 
-        // Sort matches by position (descending) to avoid offset issues
-        matches.sort((a, b) => b.start - a.start);
+            // Sort matches by position (descending) to avoid offset issues
+            matches.sort((a, b) => b.start - a.start);
 
-        let anonymized = text;
+            let anonymized = text;
 
-        // Replace matches from end to start (prevents offset shifts)
-        for (const match of matches) {
-            // Always route token creation through TokenManager for consistency
-            const token = this.tokenManager.generateToken(match.replacement, match.match);
-            mappings.set(match.match, token);
+            // Replace matches from end to start (prevents offset shifts)
+            for (const match of matches) {
+                // Always route token creation through TokenManager for consistency
+                const token = this.tokenManager.generateToken(match.replacement, match.match);
+                mappings.set(match.match, token);
 
-            // Replace the matched text with the token
-            anonymized = 
-                anonymized.substring(0, match.start) + 
-                token + 
-                anonymized.substring(match.end);
+                // Replace the matched text with the token
+                anonymized = 
+                    anonymized.substring(0, match.start) + 
+                    token + 
+                    anonymized.substring(match.end);
 
-            // Track statistics
-            patternBreakdown[match.pattern] = (patternBreakdown[match.pattern] || 0) + 1;
-        }
-
-        return {
-            original: text,
-            anonymized,
-            mappings,
-            stats: {
-                totalMatches: matches.length,
-                patternBreakdown
+                // Track statistics
+                patternBreakdown[match.pattern] = (patternBreakdown[match.pattern] || 0) + 1;
             }
-        };
+
+            return {
+                original: text,
+                anonymized,
+                mappings,
+                stats: {
+                    totalMatches: matches.length,
+                    patternBreakdown
+                }
+            };
+        } catch (error) {
+            PromptHiderLogger.error('Anonymization failed inside engine.', {
+                reason: error instanceof Error ? error.message : String(error),
+                textLength: text.length,
+            });
+            throw new Error(`Anonymization pipeline failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
     }
 
     async detectPatterns(text: string): Promise<PatternMatch[]> {
