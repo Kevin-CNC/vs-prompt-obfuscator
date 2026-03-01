@@ -84,6 +84,14 @@
         <span slot="start" class="codicon codicon-add"></span>
         Add Rule
       </vscode-button>
+      <vscode-button appearance="secondary" @click="emit('importRules')">
+        <span slot="start" class="codicon codicon-cloud-upload"></span>
+        Import Rules
+      </vscode-button>
+      <vscode-button appearance="secondary" @click="exportRules">
+        <span slot="start" class="codicon codicon-cloud-download"></span>
+        Export Rules
+      </vscode-button>
       <vscode-button appearance="secondary" @click="emit('scanIacFile')">
         <span slot="start" class="codicon codicon-search"></span>
         Scan IaC File
@@ -164,6 +172,7 @@ interface Toast {
 const props = defineProps<{
   rules: { id: string; pattern: string; replacement: string }[];
   pendingScannedRules?: { id: string; pattern: string; replacement: string }[];
+  pendingImportedRules?: { id: string; pattern: string; replacement: string }[];
 }>();
 
 const emit = defineEmits<{
@@ -171,7 +180,10 @@ const emit = defineEmits<{
   (e: 'saveSingleRule', rule: { id: string; pattern: string; replacement: string }): void;
   (e: 'deleteRule', ruleId: string): void;
   (e: 'scanIacFile'): void;
+  (e: 'importRules'): void;
+  (e: 'exportRules', rules: { id: string; pattern: string; replacement: string }[]): void;
   (e: 'scannedRulesConsumed'): void;
+  (e: 'importedRulesConsumed'): void;
 }>();
 
 const localRules = ref<RuleRow[]>([]);
@@ -255,6 +267,38 @@ watch(
   { deep: true }
 );
 
+watch(
+  () => props.pendingImportedRules,
+  (imported) => {
+    if (!imported || imported.length === 0) return;
+
+    const existingPatterns = new Set(localRules.value.map(r => r.pattern.trim()));
+    let addedCount = 0;
+
+    for (const incoming of imported) {
+      if (existingPatterns.has(incoming.pattern.trim())) continue;
+      existingPatterns.add(incoming.pattern.trim());
+      const newRule: RuleRow = {
+        id: incoming.id || generateId(),
+        pattern: incoming.pattern,
+        replacement: incoming.replacement,
+      };
+      localRules.value.push(newRule);
+      dirtyIds.value = new Set([...dirtyIds.value, newRule.id]);
+      addedCount++;
+    }
+
+    if (addedCount > 0) {
+      showToast(`${addedCount} imported rule${addedCount !== 1 ? 's' : ''} added. Save to keep.`);
+    } else {
+      showToast('Imported rules are already present.', 'error');
+    }
+
+    emit('importedRulesConsumed');
+  },
+  { deep: true }
+);
+
 function generateId(): string {
   return `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -321,6 +365,13 @@ function confirmRules() {
 
   emit('saveRules', validRules);
   showToast(`${validRules.length} rule${validRules.length !== 1 ? 's' : ''} saved.`);
+}
+
+function exportRules() {
+  const validRules = localRules.value
+    .filter(r => r.pattern.trim() !== '' || r.replacement.trim() !== '')
+    .map(r => ({ id: r.id, pattern: r.pattern.trim(), replacement: r.replacement.trim() }));
+  emit('exportRules', validRules);
 }
 </script>
 
