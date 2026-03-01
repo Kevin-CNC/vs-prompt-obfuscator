@@ -148,6 +148,14 @@ window.addEventListener('message', (event) => {
         timestamp: Date.now(),
       };
       break;
+    case 'errorNotice':
+      validationFeedback.value = {
+        level: msg.level === 'warning' ? 'warning' : 'error',
+        source: 'unknown',
+        messages: [String(msg.message ?? 'An unexpected PromptHider error occurred.')],
+        timestamp: Date.now(),
+      };
+      break;
   }
 });
 
