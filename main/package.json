@@ -163,7 +163,7 @@
         },
         "prompthider.agent.maxToolRounds": {
           "type": "number",
-          "default": 20,
+          "default": 10,
           "minimum": 1,
           "maximum": 100,
           "description": "Maximum LM tool-calling rounds for @PromptHider before the loop is stopped."
