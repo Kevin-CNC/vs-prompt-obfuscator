@@ -116,6 +116,11 @@
         "title": "Scan IaC File for Patterns",
         "icon": "$(search)",
         "category": "Prompt Hider"
+      },
+      {
+        "command": "prompthider.switchRulesheet",
+        "title": "Switch Active Rulesheet",
+        "category": "Prompt Hider"
       }
     ],
     "configuration": {
@@ -145,6 +150,41 @@
             "api-key"
           ],
           "description": "List of enabled pattern types"
+        },
+        "prompthider.mappings.autoClearOnSessionStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically clear token mappings when a new VS Code session starts for this workspace."
+        },
+        "prompthider.mappings.autoClearOnRulesheetSwitch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically clear token mappings when switching the active rulesheet."
+        },
+        "prompthider.agent.maxToolRounds": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum LM tool-calling rounds for @PromptHider before the loop is stopped."
+        },
+        "prompthider.agent.executionMode": {
+          "type": "string",
+          "default": "captured",
+          "enum": [
+            "captured",
+            "terminal"
+          ],
+          "description": "Execution mode for PromptHider tools. 'captured' runs commands once and returns structured output to the model. 'terminal' sends commands to the PromptHider terminal and returns handoff status."
+        },
+        "prompthider.agent.toolScope": {
+          "type": "string",
+          "default": "prompthiderOnly",
+          "enum": [
+            "prompthiderOnly",
+            "all"
+          ],
+          "description": "Controls which language-model tools are exposed to @PromptHider."
         }
       }
     },

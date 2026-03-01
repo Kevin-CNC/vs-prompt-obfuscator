@@ -19,6 +19,14 @@ export class ConfigManager {
         this.configFilePath = ruleFilePath;
     }
 
+    setConfigFilePath(ruleFilePath: string): void {
+        this.configFilePath = ruleFilePath;
+    }
+
+    getConfigFilePath(): string {
+        return this.configFilePath;
+    }
+
     loadConfig(): ProjectConfig {
         try {
             if (!this.rulesheetExists(this.configFilePath)) {
@@ -153,6 +161,11 @@ export class ConfigManager {
 
     getRulesheetName(): string {
         return path.basename(this.configFilePath, '.prompthider.json');
+    }
+
+    getWorkspaceFolderName(): string {
+        const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.configFilePath));
+        return folder?.name ?? 'Unknown Workspace';
     }
 
     async loadFullConfig(): Promise<ProjectConfig | null> {

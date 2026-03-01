@@ -5,6 +5,7 @@
       <div class="title-area">
         <span class="codicon codicon-shield" aria-hidden="true"></span>
         <h1 class="title">Prompt Hider</h1>
+        <span class="workspace-badge" :title="'Active workspace: ' + workspaceName">{{ workspaceName }}</span>
         <span class="rulesheet-badge" :title="'Active rulesheet: ' + rulesheetName">{{ rulesheetName }}</span>
       </div>
     </header>
@@ -57,6 +58,7 @@ provideVSCodeDesignSystem().register(
 const vscode = acquireVsCodeApi();
 
 const rulesheetName = ref('Loading...');
+const workspaceName = ref('Loading...');
 const isLoading = ref(true);
 
 interface SimpleRule {
@@ -121,6 +123,7 @@ window.addEventListener('message', (event) => {
   const msg = event.data;
   switch (msg.command) {
     case 'init':
+      workspaceName.value = msg.workspaceName ?? 'Unknown Workspace';
       rulesheetName.value = msg.rulesheetName ?? 'Unknown';
       rules.value = msg.rules ?? [];
       isLoading.value = false;
@@ -191,7 +194,8 @@ onMounted(() => {
   letter-spacing: -0.01em;
 }
 
-.rulesheet-badge {
+.rulesheet-badge,
+.workspace-badge {
   display: inline-flex;
   align-items: center;
   font-size: 11px;
