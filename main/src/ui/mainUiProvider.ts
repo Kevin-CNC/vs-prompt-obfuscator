@@ -6,6 +6,16 @@ import { ConfigManager } from '../utils/ConfigManager';
 export class mainUIProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
 
+    /**
+     * Post an arbitrary message to the webview, if it exists.
+     * Used by commands (e.g. IaC scan) to push data into the Vue app.
+     */
+    public static postMessage(message: unknown): void {
+        if (mainUIProvider.currentPanel) {
+            mainUIProvider.currentPanel.webview.postMessage(message);
+        }
+    }
+
     public static show(context: vscode.ExtensionContext, configManager?: ConfigManager) {
         // If a panel already exists, just reveal it
         if (mainUIProvider.currentPanel) {
@@ -125,6 +135,12 @@ export class mainUIProvider {
                         command: 'enabledUpdated',
                         enabled: message.enabled,
                     });
+                    break;
+                }
+
+                case 'scanIacFile': {
+                    // Delegate to the registered command which handles the file picker + scanning
+                    vscode.commands.executeCommand('prompthider.scanIacFile');
                     break;
                 }
             }
