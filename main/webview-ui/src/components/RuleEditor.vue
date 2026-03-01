@@ -84,6 +84,10 @@
         <span slot="start" class="codicon codicon-add"></span>
         Add Rule
       </vscode-button>
+      <vscode-button appearance="secondary" @click="emit('scanIacFile')">
+        <span slot="start" class="codicon codicon-search"></span>
+        Scan IaC File
+      </vscode-button>
       <vscode-button
         appearance="secondary"
         @click="confirmRules"
@@ -159,12 +163,15 @@ interface Toast {
 
 const props = defineProps<{
   rules: { id: string; pattern: string; replacement: string }[];
+  pendingScannedRules?: { id: string; pattern: string; replacement: string }[];
 }>();
 
 const emit = defineEmits<{
   (e: 'saveRules', rules: { id: string; pattern: string; replacement: string }[]): void;
   (e: 'saveSingleRule', rule: { id: string; pattern: string; replacement: string }): void;
   (e: 'deleteRule', ruleId: string): void;
+  (e: 'scanIacFile'): void;
+  (e: 'scannedRulesConsumed'): void;
 }>();
 
 const localRules = ref<RuleRow[]>([]);
@@ -210,6 +217,42 @@ watch(
     localRules.value = merged;
   },
   { immediate: true, deep: true }
+);
+
+// Watch for scanned rules arriving from the IaC scanner
+// Only add patterns that don't already exist in localRules (dedup by pattern string)
+watch(
+  () => props.pendingScannedRules,
+  (scanned) => {
+    if (!scanned || scanned.length === 0) return;
+
+    const existingPatterns = new Set(
+      localRules.value.map(r => r.pattern.trim())
+    );
+
+    let addedCount = 0;
+    for (const sr of scanned) {
+      if (existingPatterns.has(sr.pattern.trim())) continue;
+      existingPatterns.add(sr.pattern.trim());
+      const newRule: RuleRow = {
+        id: sr.id || generateId(),
+        pattern: sr.pattern,
+        replacement: sr.replacement,
+      };
+      localRules.value.push(newRule);
+      dirtyIds.value = new Set([...dirtyIds.value, newRule.id]);
+      addedCount++;
+    }
+
+    if (addedCount > 0) {
+      showToast(`${addedCount} pattern${addedCount !== 1 ? 's' : ''} added from scan. Save to keep.`);
+    } else {
+      showToast('All scanned patterns already exist.', 'error');
+    }
+
+    emit('scannedRulesConsumed');
+  },
+  { deep: true }
 );
 
 function generateId(): string {
