@@ -6,12 +6,22 @@ import { ConfigManager } from '../utils/ConfigManager';
 export class RuleEditorProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'prompthider.rulesView';
     private _view?: vscode.WebviewView;
+    private _configManager: ConfigManager;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
-        private readonly _configManager: ConfigManager,
+        configManager: ConfigManager,
         private readonly _onConfigChanged?: () => void
-    ) {}
+    ) {
+        this._configManager = configManager;
+    }
+
+    public setConfigManager(configManager: ConfigManager): void {
+        this._configManager = configManager;
+        if (this._view) {
+            void this.postInit(this._view.webview);
+        }
+    }
 
     public async resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -32,18 +42,7 @@ export class RuleEditorProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
                 case 'ready': {
-                    const config = await this._configManager.loadFullConfig();
-                    const name = this._configManager.getRulesheetName();
-                    webviewView.webview.postMessage({
-                        command: 'init',
-                        rulesheetName: name,
-                        rules: (config?.rules ?? []).map(r => ({
-                            id: r.id,
-                            pattern: typeof r.pattern === 'string' ? r.pattern : r.pattern.source,
-                            replacement: r.replacement,
-                        })),
-                        enabled: config?.enabled ?? false,
-                    });
+                    await this.postInit(webviewView.webview);
                     break;
                 }
 
@@ -156,6 +155,23 @@ export class RuleEditorProvider implements vscode.WebviewViewProvider {
             enabled: true,
             description: `Custom rule: ${String(r.pattern ?? '')} → ${String(r.replacement ?? '')}`,
         }));
+    }
+
+    private async postInit(webview: vscode.Webview): Promise<void> {
+        const config = await this._configManager.loadFullConfig();
+        const name = this._configManager.getRulesheetName();
+        webview.postMessage({
+            command: 'init',
+            rulesheetName: name,
+            workspaceName: this._configManager.getWorkspaceFolderName(),
+            rulesheetPath: this._configManager.getConfigFilePath(),
+            rules: (config?.rules ?? []).map(r => ({
+                id: r.id,
+                pattern: typeof r.pattern === 'string' ? r.pattern : r.pattern.source,
+                replacement: r.replacement,
+            })),
+            enabled: config?.enabled ?? false,
+        });
     }
 
     private async importRulesToWebview(webview: vscode.Webview): Promise<void> {

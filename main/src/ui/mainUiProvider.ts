@@ -7,6 +7,7 @@ import { validateRules } from '../anonymizer/RuleValidator';
 export class mainUIProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
     private static onConfigChanged?: () => void;
+    private static activeConfigManager?: ConfigManager;
 
     /**
      * Post an arbitrary message to the webview, if it exists.
@@ -18,14 +19,27 @@ export class mainUIProvider {
         }
     }
 
+    public static refreshCurrentPanel(): void {
+        if (mainUIProvider.currentPanel && mainUIProvider.activeConfigManager) {
+            void mainUIProvider.postInit(mainUIProvider.currentPanel.webview, mainUIProvider.activeConfigManager);
+        }
+    }
+
     public static show(context: vscode.ExtensionContext, configManager?: ConfigManager, onConfigChanged?: () => void) {
         if (onConfigChanged) {
             mainUIProvider.onConfigChanged = onConfigChanged;
         }
 
+        if (configManager) {
+            mainUIProvider.activeConfigManager = configManager;
+        }
+
         // If a panel already exists, just reveal it
         if (mainUIProvider.currentPanel) {
             mainUIProvider.currentPanel.reveal(vscode.ViewColumn.One);
+            if (mainUIProvider.activeConfigManager) {
+                void mainUIProvider.postInit(mainUIProvider.currentPanel.webview, mainUIProvider.activeConfigManager);
+            }
             return;
         }
 
@@ -52,24 +66,14 @@ export class mainUIProvider {
         panel.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
                 case 'ready': {
-                    if (!configManager) { break; }
-                    const config = await configManager.loadFullConfig();
-                    const name = configManager.getRulesheetName();
-                    panel.webview.postMessage({
-                        command: 'init',
-                        rulesheetName: name,
-                        rules: (config?.rules ?? []).map(r => ({
-                            id: r.id,
-                            pattern: typeof r.pattern === 'string' ? r.pattern : r.pattern.source,
-                            replacement: r.replacement,
-                        })),
-                        enabled: config?.enabled ?? false,
-                    });
+                    if (!mainUIProvider.activeConfigManager) { break; }
+                    await mainUIProvider.postInit(panel.webview, mainUIProvider.activeConfigManager);
                     break;
                 }
 
                 case 'saveRules': {
-                    if (!configManager) { break; }
+                    const activeConfig = mainUIProvider.activeConfigManager;
+                    if (!activeConfig) { break; }
                     const rules = mainUIProvider.normalizeRules(message.rules as any[]);
 
                     const validation = validateRules(rules);
@@ -104,18 +108,19 @@ export class mainUIProvider {
                         }
                     }
 
-                    await configManager.saveProjectRules(rules);
+                    await activeConfig.saveProjectRules(rules);
                     mainUIProvider.onConfigChanged?.();
                     panel.webview.postMessage({ command: 'rulesSaved', ruleIds: rules.map(r => r.id) });
                     break;
                 }
 
                 case 'saveSingleRule': {
-                    if (!configManager) { break; }
+                    const activeConfig = mainUIProvider.activeConfigManager;
+                    if (!activeConfig) { break; }
                     const ruleCarried = message.rule as { id: string; pattern: string; replacement: string };
 
                     // Load current rules from disk
-                    const loadedProject = await configManager.loadFullConfig();
+                    const loadedProject = await activeConfig.loadFullConfig();
                     const currentRules = Array.isArray(loadedProject?.rules) ? loadedProject.rules : [];
                     const ruleExistsIndx = currentRules.findIndex(r => r.id === ruleCarried.id);
                     
@@ -172,7 +177,7 @@ export class mainUIProvider {
                     }
 
                     // Save to disk (ConfigManager will handle pattern normalization)
-                    await configManager.saveProjectRules(currentRules);
+                    await activeConfig.saveProjectRules(currentRules);
                     mainUIProvider.onConfigChanged?.();
                     panel.webview.postMessage({ command: 'rulesSaved', ruleIds: [normalizedRule.id] });
                     break;
@@ -180,16 +185,17 @@ export class mainUIProvider {
 
 
                 case 'deleteRule': {
-                    if (!configManager) { break; }
+                    const activeConfig = mainUIProvider.activeConfigManager;
+                    if (!activeConfig) { break; }
                     const ruleIdToDelete = message.id as string;
 
                     // Load & Filter out current rules from disk
-                    const loadedProject = await configManager.loadFullConfig();
+                    const loadedProject = await activeConfig.loadFullConfig();
                     const currentRules = Array.isArray(loadedProject?.rules) ? loadedProject.rules : [];
                     const updatedRules = currentRules.filter(r => r.id !== ruleIdToDelete);
                     
                     // Save the updated rules
-                    await configManager.saveProjectRules(updatedRules);
+                    await activeConfig.saveProjectRules(updatedRules);
                     mainUIProvider.onConfigChanged?.();
                     panel.webview.postMessage({ command: 'ruleDeleted' });
                     break;
@@ -201,8 +207,9 @@ export class mainUIProvider {
                 }
 
                 case 'exportRules': {
-                    if (!configManager) { break; }
-                    await mainUIProvider.exportRulesFromWebview(configManager, message.rules as any[]);
+                    const activeConfig = mainUIProvider.activeConfigManager;
+                    if (!activeConfig) { break; }
+                    await mainUIProvider.exportRulesFromWebview(activeConfig, message.rules as any[]);
                     break;
                 }
 
@@ -259,6 +266,23 @@ export class mainUIProvider {
             enabled: true,
             description: `Custom rule: ${String(r.pattern ?? '')} → ${String(r.replacement ?? '')}`,
         }));
+    }
+
+    private static async postInit(webview: vscode.Webview, configManager: ConfigManager): Promise<void> {
+        const config = await configManager.loadFullConfig();
+        const name = configManager.getRulesheetName();
+        webview.postMessage({
+            command: 'init',
+            rulesheetName: name,
+            workspaceName: configManager.getWorkspaceFolderName(),
+            rulesheetPath: configManager.getConfigFilePath(),
+            rules: (config?.rules ?? []).map(r => ({
+                id: r.id,
+                pattern: typeof r.pattern === 'string' ? r.pattern : r.pattern.source,
+                replacement: r.replacement,
+            })),
+            enabled: config?.enabled ?? false,
+        });
     }
 
     private static async importRulesToWebview(webview: vscode.Webview): Promise<void> {
