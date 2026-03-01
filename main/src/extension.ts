@@ -112,6 +112,9 @@ export async function activate(context: vscode.ExtensionContext) {
     const anonymizationEngine = new AnonymizationEngine(tokenManager, configs);
     const commandExecutor = new CommandExecutor(tokenManager);
 
+    // Create mappingsViewProvider early so the chat participant can refresh it.
+    const mappingsViewProvider = new MappingsViewProvider(tokenManager);
+
     const toolDisposable = vscode.lm.registerTool('prompthider_execute_command', commandExecutor);
     context.subscriptions.push(toolDisposable);
 
@@ -131,6 +134,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         if (result.stats.totalMatches > 0) {
             stream.markdown(`> **PromptHider**: ${result.stats.totalMatches} pattern(s) anonymized before sending.\n\n`);
+            mappingsViewProvider.refresh();
         }
 
         const messages: vscode.LanguageModelChatMessage[] = [];
@@ -233,18 +237,22 @@ export async function activate(context: vscode.ExtensionContext) {
             } else {
                 throw err;
             }
+        } finally {
+            // Always refresh the sidebar so it reflects the latest session mappings.
+            mappingsViewProvider.refresh();
         }
     });
     
     context.subscriptions.push(chatParticipant);
-
-    const mappingsViewProvider = new MappingsViewProvider(tokenManager);
     const ruleEditorProvider = new RuleEditorProvider(
         vscode.Uri.file(context.extensionPath),
         configs
     );
 
     vscode.window.registerTreeDataProvider('prompthider.mappingsView', mappingsViewProvider);
+    // Populate the tree immediately with any mappings already in workspaceState
+    // (persisted from a previous session against the same rulesheet).
+    mappingsViewProvider.refresh();
     vscode.window.registerWebviewViewProvider(RuleEditorProvider.viewType, ruleEditorProvider);
 
     const openWebUI = vscode.commands.registerCommand(
