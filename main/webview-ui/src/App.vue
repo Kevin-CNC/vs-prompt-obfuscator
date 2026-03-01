@@ -2,25 +2,19 @@
   <main class="container">
     <!-- Header -->
     <header class="header">
-      <div class="title-container">
+      <div class="title-area">
+        <span class="codicon codicon-shield" aria-hidden="true"></span>
         <h1 class="title">Prompt Hider</h1>
-        <vscode-tag>{{ rulesheetName }}</vscode-tag>
-      </div>
-      <div class="actions-container">
-        <vscode-switch :checked="enabled" @change="handleToggleEnabled">
-          Anonymization Enabled
-        </vscode-switch>
+        <span class="rulesheet-badge" :title="'Active rulesheet: ' + rulesheetName">{{ rulesheetName }}</span>
       </div>
     </header>
 
-    <!-- Rule Editor View -->
+    <!-- Rule Editor -->
     <RuleEditor
       :rules="rules"
-      :enabled="enabled"
       @save-rules="handleSaveRules"
       @save-single-rule="handleSaveSingleRule"
       @delete-rule="handleDeleteRule"
-      @toggle-enabled="handleToggleEnabled"
     />
   </main>
 </template>
@@ -31,26 +25,16 @@ import RuleEditor from './components/RuleEditor.vue';
 import {
   provideVSCodeDesignSystem,
   vsCodeButton,
-  vsCodeDataGrid,
-  vsCodeDataGridCell,
-  vsCodeDataGridRow,
-  vsCodeTag,
   vsCodeTextField
 } from '@vscode/webview-ui-toolkit';
 
-// Register the VS Code Webview UI Toolkit components
 provideVSCodeDesignSystem().register(
   vsCodeButton(),
-  vsCodeDataGrid(),
-  vsCodeDataGridCell(),
-  vsCodeDataGridRow(),
-  vsCodeTag(),
   vsCodeTextField()
 );
 
 const vscode = acquireVsCodeApi();
 
-// ---- Reactive state ----
 const rulesheetName = ref('Loading...');
 const enabled = ref(false);
 
@@ -61,22 +45,12 @@ interface SimpleRule {
 }
 const rules = ref<SimpleRule[]>([]);
 
-// ---- Enable / Disable toggle ----
-function handleToggleEnabled() {
-  const newEnabledState = !enabled.value;
-  enabled.value = newEnabledState;
-  vscode.postMessage({ command: 'toggleEnabled', enabled: newEnabledState });
-}
-
-// ---- Save rules ----
 function handleSaveRules(newRules: SimpleRule[]) {
   rules.value = newRules;
   vscode.postMessage({ command: 'saveRules', rules: newRules });
 }
 
-// ---- Save single rule ----
 function handleSaveSingleRule(rule: SimpleRule) {
-  // Update the rule in local state
   const idx = rules.value.findIndex(r => r.id === rule.id);
   if (idx !== -1) {
     rules.value[idx] = rule;
@@ -86,15 +60,11 @@ function handleSaveSingleRule(rule: SimpleRule) {
   vscode.postMessage({ command: 'saveSingleRule', rule });
 }
 
-// ---- Delete single rule ----
 function handleDeleteRule(ruleId: string) {
-  // Remove from local state
   rules.value = rules.value.filter(r => r.id !== ruleId);
-  // Send to extension backend
   vscode.postMessage({ command: 'deleteRule', id: ruleId });
 }
 
-// ---- Listen for messages from the extension host ----
 window.addEventListener('message', (event) => {
   const msg = event.data;
   switch (msg.command) {
@@ -109,7 +79,6 @@ window.addEventListener('message', (event) => {
   }
 });
 
-// ---- Tell the extension we're ready ----
 onMounted(() => {
   vscode.postMessage({ command: 'ready' });
 });
@@ -119,40 +88,52 @@ onMounted(() => {
 .container {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 24px;
   height: 100vh;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding-bottom: 16px;
+  padding: 14px 20px 12px;
   border-bottom: 1px solid var(--vscode-editorGroup-border);
+  flex-shrink: 0;
 }
 
-.title-container {
+.title-area {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+}
+
+.title-area .codicon {
+  font-size: 17px;
+  color: var(--vscode-textLink-foreground);
+  opacity: 0.9;
 }
 
 .title {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   color: var(--vscode-editor-foreground);
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
-.actions-container {
-  display: flex;
+.rulesheet-badge {
+  display: inline-flex;
   align-items: center;
-  gap: 16px;
-}
-
-vscode-switch {
-  padding-top: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background-color: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  letter-spacing: 0.02em;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
