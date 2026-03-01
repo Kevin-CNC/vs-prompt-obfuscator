@@ -40,6 +40,25 @@ const CIDR_ALLOWLIST = new Set([
     '::/0',
 ]);
 
+// Well-known generic placeholder usernames that are NOT real credentials.
+// These are framework defaults / documentation examples — flagging them
+// creates noise and violates the "avoids the admin false-positive" design contract.
+const DB_USER_BLOCKLIST = new Set([
+    'admin', 'root', 'postgres', 'mysql', 'oracle',
+    'sa', 'user', 'dbuser', 'dbadmin', 'administrator',
+]);
+
+// Well-known public AWS account IDs (published in official vendor documentation).
+// These are not sensitive — flagging them creates noise for users.
+const PUBLIC_AWS_ACCOUNT_BLOCKLIST = new Set([
+    '099720109477', // Canonical (Ubuntu)
+    '137112412989', // Amazon Linux (Amazon)
+    '309956199498', // Red Hat
+    '125523088429', // CentOS
+    '013907871322', // Kali Linux
+    '679593333241', // openSUSE
+]);
+
 const GENERIC_NAME_TOKENS = new Set([
     'web', 'app', 'db', 'api', 'lb', 'sg', 'rt', 'igw', 'nat', 'vpc',
     'public', 'private', 'internal', 'external', 'server', 'worker',
@@ -47,6 +66,8 @@ const GENERIC_NAME_TOKENS = new Set([
     'subnet', 'group', 'cluster', 'node', 'pod', 'svc', 'service',
     'gateway', 'listener', 'target', 'route', 'table', 'association',
     'instance', 'launch', 'template', 'asg', 'tg', 'alb', 'nlb', 'elb',
+    // HCL attribute key literals that can appear as values in filter blocks
+    'name', 'key', 'tag', 'id', 'env',
 ]);
 
 // HCL field values that are protocol / engine type literals — never
@@ -96,6 +117,9 @@ function detectAwsAccountIds(content: string): DetectorResult[] {
     let counter = 1;
     while ((m = regex.exec(content)) !== null) {
         const id = m[1];
+        // Skip well-known public vendor account IDs — they are documented openly
+        // and carry no confidentiality risk.
+        if (PUBLIC_AWS_ACCOUNT_BLOCKLIST.has(id)) { continue; }
         if (seen.has(id)) { continue; }
         seen.add(id);
         results.push({
@@ -145,6 +169,9 @@ function detectDbCredentials(content: string): DetectorResult[] {
     let userCounter = 1;
     while ((m = usernameRegex.exec(content)) !== null) {
         const val = m[1];
+        // Skip well-known generic placeholder usernames — these are framework
+        // defaults and documentation examples, not real credentials.
+        if (DB_USER_BLOCKLIST.has(val.toLowerCase())) { continue; }
         if (seen.has(val)) { continue; }
         seen.add(val);
         results.push({
@@ -187,8 +214,9 @@ function detectResourceNames(content: string): DetectorResult[] {
     let m: RegExpExecArray | null;
     let counter = 1;
     while ((m = regex.exec(content)) !== null) {
-        const name = m[1];
-        // Skip HCL protocol / engine type literals
+        const name = m[1];        // Skip values shorter than 5 characters — single-word HCL keywords
+        // (e.g. "name", "key", "id") or trivial labels that are never identifiers.
+        if (name.length < 5) { continue; }        // Skip HCL protocol / engine type literals
         if (RESOURCE_NAME_VALUE_BLOCKLIST.has(name)) { continue; }
         // Skip interpolation expressions (contain ${)
         if (name.includes('${')) { continue; }
