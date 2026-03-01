@@ -107,11 +107,6 @@
         "category": "Prompt Hider - Quick Actions"
       },
       {
-        "command": "prompthider.toggleAnonymization",
-        "title": "Toggle Auto-Anonymization",
-        "category": "Prompt Hider"
-      },
-      {
         "command": "prompthider.clearMappings",
         "title": "Clear Token Mappings",
         "category": "Prompt Hider"
