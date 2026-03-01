@@ -1,90 +1,144 @@
-<template>
+﻿<template>
   <div class="rule-editor-container">
-    <vscode-data-grid :rows-data="localRules" grid-template-columns="1fr 1fr 120px" aria-label="Anonymization Rules">
-      <vscode-data-grid-row row-type="header">
-        <vscode-data-grid-cell cell-type="columnheader" grid-column="1">Pattern (Regex)</vscode-data-grid-cell>
-        <vscode-data-grid-cell cell-type="columnheader" grid-column="2">Replacement</vscode-data-grid-cell>
-        <vscode-data-grid-cell cell-type="columnheader" grid-column="3">Actions</vscode-data-grid-cell>
-      </vscode-data-grid-row>
-      <vscode-data-grid-row
-        v-for="(rule, index) in localRules"
-        :key="rule.id"
-        :class="{ 'row-dirty': dirtyIds.has(rule.id) }"
-      >
-        <vscode-data-grid-cell grid-column="1">
-          <vscode-text-field
-            :value="rule.pattern"
-            @input="updateRule(index, 'pattern', $event.target.value)"
-            placeholder="e.g., API_KEY_\\w+"
-            class="w-full"
-          ></vscode-text-field>
-        </vscode-data-grid-cell>
-        <vscode-data-grid-cell grid-column="2">
-          <vscode-text-field
-            :value="rule.replacement"
-            @input="updateRule(index, 'replacement', $event.target.value)"
-            placeholder="e.g., API_KEY_{index}"
-            class="w-full"
-          ></vscode-text-field>
-        </vscode-data-grid-cell>
-        <vscode-data-grid-cell grid-column="3" class="actions-cell">
-          <span v-if="dirtyIds.has(rule.id)" class="unsaved-indicator" title="Unsaved changes">●</span>
-          
-          <!-- Delete button -->
-          <vscode-button appearance="icon" @click="requestRemoveRule(index)" aria-label="Delete rule">
-            <span class="codicon codicon-trash"></span>
-          </vscode-button>
-          <!-- Delete button -->
 
+    <!-- Rules table -->
+    <div class="rules-grid-wrapper">
+      <div class="grid-header" aria-hidden="true">
+        <div class="col-pattern">Pattern (Regex)</div>
+        <div class="col-replacement">Replacement</div>
+        <div class="col-actions">Actions</div>
+      </div>
 
-          <!-- Save Rule button -->
-          <vscode-button appearance="icon" @click="saveSingleRule(index)" aria-label="Save rule">
-            <span class="codicon codicon-save"></span>
-          </vscode-button>
-          <!-- Save Rule button -->
-          
+      <!-- Empty state -->
+      <Transition name="fade">
+        <div v-if="localRules.length === 0" class="empty-state">
+          <span class="codicon codicon-filter" aria-hidden="true"></span>
+          <p class="empty-title">No rules yet</p>
+          <p class="empty-sub">Click <strong>Add Rule</strong> to create your first anonymization pattern.</p>
+        </div>
+      </Transition>
 
-        </vscode-data-grid-cell>
-      </vscode-data-grid-row>
-    </vscode-data-grid>
+      <TransitionGroup name="rule-row" tag="div" class="grid-body">
+        <div
+          v-for="(rule, index) in localRules"
+          :key="rule.id"
+          class="grid-row"
+          :class="{ 'row-dirty': dirtyIds.has(rule.id) }"
+          role="row"
+          :aria-label="`Rule ${index + 1}`"
+        >
+          <!-- Dirty indicator bar (left edge) -->
+          <span
+            v-if="dirtyIds.has(rule.id)"
+            class="dirty-bar"
+            title="Unsaved changes"
+            aria-label="Unsaved changes"
+          ></span>
 
+          <div class="col-pattern">
+            <vscode-text-field
+              :value="rule.pattern"
+              @input="updateRule(index, 'pattern', ($event.target as HTMLInputElement).value)"
+              placeholder="e.g., \b\d{1,3}(\.\d{1,3}){3}\b"
+              class="field-full"
+              aria-label="Pattern"
+            ></vscode-text-field>
+          </div>
+
+          <div class="col-replacement">
+            <vscode-text-field
+              :value="rule.replacement"
+              @input="updateRule(index, 'replacement', ($event.target as HTMLInputElement).value)"
+              placeholder="e.g., IP_TOKEN"
+              class="field-full"
+              aria-label="Replacement token"
+            ></vscode-text-field>
+          </div>
+
+          <div class="col-actions">
+            <vscode-button
+              appearance="icon"
+              @click="saveSingleRule(index)"
+              :title="dirtyIds.has(rule.id) ? 'Save this rule' : 'Rule saved'"
+              aria-label="Save rule"
+            >
+              <span class="codicon codicon-save"></span>
+            </vscode-button>
+            <vscode-button
+              appearance="icon"
+              @click="requestRemoveRule(index)"
+              title="Delete rule"
+              aria-label="Delete rule"
+              class="btn-danger"
+            >
+              <span class="codicon codicon-trash"></span>
+            </vscode-button>
+          </div>
+        </div>
+      </TransitionGroup>
+    </div>
+
+    <!-- Footer -->
     <div class="footer-actions">
-      <div class="footer-group">
-        <vscode-button appearance="primary" @click="addRule">
-          <span slot="start" class="codicon codicon-plus"></span>
-          Add Rule
-        </vscode-button>
-        <vscode-button appearance="secondary" @click="confirmRules">Save All Rules</vscode-button>
-      </div>
-      <div class="footer-group">
-        <vscode-switch :checked="enabled" @change="$emit('toggleEnabled')">
-          Anonymization
-        </vscode-switch>
-        <vscode-button appearance="secondary" disabled title="This feature is under development">Export/Import Rules</vscode-button>
-      </div>
+      <vscode-button appearance="primary" @click="addRule">
+        <span slot="start" class="codicon codicon-add"></span>
+        Add Rule
+      </vscode-button>
+      <vscode-button
+        appearance="secondary"
+        @click="confirmRules"
+        :disabled="dirtyIds.size === 0 || undefined"
+        title="Save all modified rules"
+      >
+        <span slot="start" class="codicon codicon-save-all"></span>
+        Save All
+      </vscode-button>
     </div>
 
-    <div v-if="showSaved" class="save-feedback" role="status" aria-live="polite">
-      Rules saved successfully!
+    <!-- Toast notifications -->
+    <div class="toast-region" aria-live="polite" aria-atomic="false">
+      <TransitionGroup name="toast">
+        <div
+          v-for="toast in toasts"
+          :key="toast.id"
+          class="toast"
+          :class="'toast--' + toast.type"
+          role="status"
+        >
+          <span class="codicon" :class="toast.type === 'success' ? 'codicon-check' : 'codicon-error'" aria-hidden="true"></span>
+          {{ toast.message }}
+        </div>
+      </TransitionGroup>
     </div>
 
-    <div v-if="showSingleSaved" class="save-feedback" role="status" aria-live="polite">
-      Rule saved successfully!
-    </div>
-
-    <!-- Deletion Confirmation Dialog -->
-    <div v-if="ruleToDelete" class="dialog-overlay">
-      <div class="dialog-content" role="alertdialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
-        <h2 id="dialog-title" class="dialog-title">Delete Pattern</h2>
-        <p id="dialog-description" class="dialog-description">
-          Are you sure you want to delete the pattern "{{ ruleToDelete.rule.pattern }}"? This action cannot be undone.
-        </p>
-        <div class="dialog-actions">
-          <vscode-button appearance="secondary" @click="cancelRemoveRule">Cancel</vscode-button>
-          <vscode-button appearance="primary" @click="confirmRemoveRule" class="delete-button">Delete</vscode-button>
+    <!-- Delete Confirmation Dialog -->
+    <Transition name="dialog">
+      <div v-if="ruleToDelete" class="dialog-overlay" role="presentation" @click.self="cancelRemoveRule">
+        <div
+          class="dialog-content"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="dialog-title"
+          aria-describedby="dialog-description"
+        >
+          <div class="dialog-icon">
+            <span class="codicon codicon-warning" aria-hidden="true"></span>
+          </div>
+          <h2 id="dialog-title" class="dialog-title">Delete Rule</h2>
+          <p id="dialog-description" class="dialog-description">
+            Delete pattern <code class="pattern-preview">{{ ruleToDelete.rule.pattern || '(empty)' }}</code>?
+            This cannot be undone.
+          </p>
+          <div class="dialog-actions">
+            <vscode-button appearance="secondary" @click="cancelRemoveRule">Cancel</vscode-button>
+            <vscode-button appearance="primary" @click="confirmRemoveRule" class="btn-delete-confirm">
+              Delete
+            </vscode-button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
+
   </div>
 </template>
 
@@ -97,50 +151,59 @@ export interface RuleRow {
   replacement: string;
 }
 
+interface Toast {
+  id: number;
+  message: string;
+  type: 'success' | 'error';
+}
+
 const props = defineProps<{
   rules: { id: string; pattern: string; replacement: string }[];
-  enabled: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'saveRules', rules: { id: string; pattern: string; replacement: string }[]): void;
   (e: 'saveSingleRule', rule: { id: string; pattern: string; replacement: string }): void;
   (e: 'deleteRule', ruleId: string): void;
-  (e: 'toggleEnabled'): void;
 }>();
 
 const localRules = ref<RuleRow[]>([]);
-const showSaved = ref(false);
-const showSingleSaved = ref(false);
 const ruleToDelete = ref<{ rule: RuleRow; index: number } | null>(null);
 const dirtyIds = ref<Set<string>>(new Set());
 
+// Toast system
+const toasts = ref<Toast[]>([]);
+let toastCounter = 0;
+
+function showToast(message: string, type: Toast['type'] = 'success') {
+  const id = ++toastCounter;
+  toasts.value.push({ id, message, type });
+  setTimeout(() => {
+    toasts.value = toasts.value.filter(t => t.id !== id);
+  }, 3500);
+}
+
+// Merge incoming prop changes, preserving dirty local edits
 watch(
   () => props.rules,
   (newRules) => {
     const incoming: RuleRow[] = JSON.parse(JSON.stringify(newRules || []));
 
     if (localRules.value.length === 0) {
-      // First load — take everything as-is
       localRules.value = incoming;
       return;
     }
 
-    // Merge: keep dirty rows untouched, update clean rows with latest prop values
     const incomingMap = new Map(incoming.map(r => [r.id, r]));
 
-    // Update existing clean rows and add new rows from props
     const merged: RuleRow[] = localRules.value.map(local => {
-      if (dirtyIds.value.has(local.id)) {
-        return local; // Keep unsaved edits
-      }
+      if (dirtyIds.value.has(local.id)) return local;
       return incomingMap.get(local.id) ?? local;
     });
 
-    // Add any brand-new rows from props that don't exist locally yet
-    for (const incoming of (newRules || [])) {
-      if (!merged.find(r => r.id === incoming.id)) {
-        merged.push(JSON.parse(JSON.stringify(incoming)));
+    for (const inc of (newRules || [])) {
+      if (!merged.find(r => r.id === inc.id)) {
+        merged.push(JSON.parse(JSON.stringify(inc)));
       }
     }
 
@@ -154,29 +217,26 @@ function generateId(): string {
 }
 
 function addRule() {
-  localRules.value.push({
-    id: generateId(),
-    pattern: '',
-    replacement: '',
-  });
+  const newRule: RuleRow = { id: generateId(), pattern: '', replacement: '' };
+  localRules.value.push(newRule);
+  // New unsaved rows are marked dirty immediately
+  dirtyIds.value = new Set([...dirtyIds.value, newRule.id]);
 }
 
 function requestRemoveRule(index: number) {
   const rule = localRules.value[index];
-  if (rule) {
-    ruleToDelete.value = { rule, index };
-  }
+  if (rule) ruleToDelete.value = { rule, index };
 }
 
 function confirmRemoveRule() {
   if (ruleToDelete.value !== null) {
-
-    const ruleToDeleteID = ruleToDelete.value.rule.id;
-
+    const id = ruleToDelete.value.rule.id;
     localRules.value.splice(ruleToDelete.value.index, 1);
+    const next = new Set(dirtyIds.value);
+    next.delete(id);
+    dirtyIds.value = next;
     ruleToDelete.value = null;
-    
-    emit('deleteRule', ruleToDeleteID);
+    emit('deleteRule', id);
   }
 }
 
@@ -187,145 +247,278 @@ function cancelRemoveRule() {
 function updateRule(index: number, field: 'pattern' | 'replacement', value: string) {
   if (localRules.value[index]) {
     localRules.value[index][field] = value;
-    // Mark this row as having unsaved changes
     dirtyIds.value = new Set([...dirtyIds.value, localRules.value[index].id]);
   }
 }
 
 function saveSingleRule(index: number) {
-  const ruleToSave = localRules.value[index];
+  const rule = localRules.value[index];
+  if (!rule || (rule.pattern.trim() === '' && rule.replacement.trim() === '')) return;
 
-  if (ruleToSave.pattern.trim() !== '' || ruleToSave.replacement.trim() !== ''){
-    emit('saveSingleRule', {
-      id: ruleToSave.id,
-      pattern: ruleToSave.pattern.trim(),
-      replacement: ruleToSave.replacement.trim(),
-    });
+  emit('saveSingleRule', {
+    id: rule.id,
+    pattern: rule.pattern.trim(),
+    replacement: rule.replacement.trim(),
+  });
 
-    // Row is now saved — remove from dirty tracking
-    const next = new Set(dirtyIds.value);
-    next.delete(ruleToSave.id);
-    dirtyIds.value = next;
+  const next = new Set(dirtyIds.value);
+  next.delete(rule.id);
+  dirtyIds.value = next;
 
-    showSingleSaved.value = true;
-    setTimeout(() => {
-      showSingleSaved.value = false;
-    }, 2500);
-  }
+  showToast('Rule saved.');
 }
 
 function confirmRules() {
   const validRules = localRules.value
-    .filter((r) => r.pattern.trim() !== '' || r.replacement.trim() !== '')
-    .map((r) => ({
-      id: r.id,
-      pattern: r.pattern.trim(),
-      replacement: r.replacement.trim(),
-    }));
+    .filter(r => r.pattern.trim() !== '' || r.replacement.trim() !== '')
+    .map(r => ({ id: r.id, pattern: r.pattern.trim(), replacement: r.replacement.trim() }));
 
   localRules.value = validRules;
-  // All rows saved — clear all dirty state
   dirtyIds.value = new Set();
 
   emit('saveRules', validRules);
-
-  showSaved.value = true;
-  setTimeout(() => {
-    showSaved.value = false;
-  }, 2500);
+  showToast(`${validRules.length} rule${validRules.length !== 1 ? 's' : ''} saved.`);
 }
 </script>
 
 <style scoped>
+/* â”€â”€â”€ Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .rule-editor-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  gap: 16px;
-  padding: 0 24px 24px 24px;
-  box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
 }
 
-vscode-data-grid {
-  flex-grow: 1;
+/* â”€â”€â”€ Grid wrapper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.rules-grid-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
 }
 
-.actions-cell {
+/* â”€â”€â”€ Grid columns: pattern | replacement | 96px actions â”€â”€â”€ */
+.grid-header,
+.grid-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 96px;
+  align-items: center;
+}
+
+.grid-header {
+  padding: 6px 20px;
+  background-color: var(--vscode-editorGroupHeader-tabsBackground);
+  border-bottom: 1px solid var(--vscode-editorGroup-border);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--vscode-descriptionForeground);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.grid-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.grid-row {
+  position: relative;
+  padding: 5px 20px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border);
+  gap: 8px;
+  transition: background-color 0.15s ease;
+}
+
+.grid-row:last-child {
+  border-bottom: none;
+}
+
+.grid-row:hover {
+  background-color: var(--vscode-list-hoverBackground);
+}
+
+/* â”€â”€â”€ Dirty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.dirty-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background-color: var(--vscode-inputValidation-warningBorder, #cca700);
+  pointer-events: none;
+}
+
+.row-dirty {
+  background-color: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.04));
+}
+
+/* â”€â”€â”€ Column helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.col-pattern,
+.col-replacement {
+  min-width: 0;
+}
+
+.col-actions {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 2px;
 }
 
-.w-full {
+.field-full {
   width: 100%;
+  display: block;
 }
 
+/* â”€â”€â”€ Danger button (trash) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.btn-danger::part(control) {
+  color: var(--vscode-errorForeground);
+  opacity: 0.75;
+  transition: opacity 0.15s ease;
+}
+.btn-danger:hover::part(control) {
+  opacity: 1;
+}
+
+/* â”€â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .footer-actions {
-  position: sticky;
-  bottom: 0;
+  flex-shrink: 0;
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: 8px;
-  padding: 16px;
+  padding: 10px 20px;
   border-top: 1px solid var(--vscode-editorGroup-border);
   background-color: var(--vscode-editor-background);
-  box-shadow: 0 -4px 12px -4px var(--vscode-scrollbar-shadow);
+  box-shadow: 0 -2px 8px -2px rgba(0, 0, 0, 0.15);
 }
 
-.footer-group {
+/* â”€â”€â”€ Empty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  gap: 8px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+.empty-state .codicon {
+  font-size: 32px;
+  opacity: 0.35;
+  margin-bottom: 4px;
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vscode-editor-foreground);
+  opacity: 0.7;
+}
+
+.empty-sub {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.55;
+  max-width: 260px;
+  line-height: 1.5;
+}
+
+/* â”€â”€â”€ Toast region â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.toast-region {
+  position: fixed;
+  bottom: 56px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 300;
+  pointer-events: none;
+}
+
+.toast {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 8px 14px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  pointer-events: auto;
 }
 
-.save-feedback {
-  position: fixed;
-  bottom: 80px; /* Adjusted for footer */
-  right: 24px;
+.toast--success {
   background-color: var(--vscode-statusBar-background);
   color: var(--vscode-statusBar-foreground);
-  padding: 8px 16px;
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  transition: opacity 0.3s ease;
-  z-index: 100;
+  border: 1px solid var(--vscode-statusBar-border, transparent);
 }
 
-/* Dialog Styles */
+.toast--error {
+  background-color: var(--vscode-inputValidation-errorBackground);
+  color: var(--vscode-inputValidation-errorForeground, var(--vscode-errorForeground));
+  border: 1px solid var(--vscode-inputValidation-errorBorder);
+}
+
+/* â”€â”€â”€ Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .dialog-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.6);
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  background-color: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
   z-index: 200;
 }
 
 .dialog-content {
   background-color: var(--vscode-editor-background);
   color: var(--vscode-editor-foreground);
-  padding: 24px;
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  padding: 24px 24px 20px;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
   width: 90%;
-  max-width: 400px;
+  max-width: 380px;
   border: 1px solid var(--vscode-editorGroup-border);
 }
 
+.dialog-icon {
+  font-size: 22px;
+  color: var(--vscode-inputValidation-warningBorder, #cca700);
+  margin-bottom: 10px;
+}
+
 .dialog-title {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0 0 12px 0;
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 10px;
 }
 
 .dialog-description {
-  margin: 0 0 24px 0;
+  margin: 0 0 22px;
+  font-size: 13px;
   color: var(--vscode-descriptionForeground);
+  line-height: 1.5;
+}
+
+.pattern-preview {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  background-color: var(--vscode-textCodeBlock-background);
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 
 .dialog-actions {
@@ -334,21 +527,72 @@ vscode-data-grid {
   gap: 8px;
 }
 
-.delete-button::part(control) {
+.btn-delete-confirm::part(control) {
   background-color: var(--vscode-errorForeground);
-  color: var(--vscode-button-foreground);
+  color: #fff;
 }
 
-.row-dirty {
-  border-left: 3px solid var(--vscode-inputValidation-warningBorder, #cca700);
-  background-color: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.05));
+/* â”€â”€â”€ Row enter/leave â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.rule-row-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.rule-row-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  position: absolute;
+  width: 100%;
+}
+.rule-row-enter-from {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.rule-row-leave-to {
+  opacity: 0;
+  transform: translateX(16px);
+}
+.rule-row-move {
+  transition: transform 0.2s ease;
 }
 
-.unsaved-indicator {
-  color: var(--vscode-inputValidation-warningBorder, #cca700);
-  font-size: 10px;
-  margin-right: 4px;
-  flex-shrink: 0;
-  align-self: center;
+/* â”€â”€â”€ Toast enter/leave â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.toast-enter-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.toast-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.toast-enter-from {
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+}
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(12px) scale(0.96);
+}
+
+/* â”€â”€â”€ Empty state fade â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
+}
+
+/* â”€â”€â”€ Dialog enter/leave â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.dialog-enter-active {
+  transition: opacity 0.2s ease;
+}
+.dialog-leave-active {
+  transition: opacity 0.18s ease;
+}
+.dialog-enter-from, .dialog-leave-to {
+  opacity: 0;
+}
+.dialog-enter-from .dialog-content,
+.dialog-leave-to .dialog-content {
+  transform: scale(0.97) translateY(-6px);
+}
+.dialog-enter-active .dialog-content,
+.dialog-leave-active .dialog-content {
+  transition: transform 0.2s ease;
 }
 </style>
