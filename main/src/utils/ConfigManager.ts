@@ -167,17 +167,4 @@ export class ConfigManager {
         }
     }
 
-    async setEnabled(enabled: boolean): Promise<void> {
-        try {
-            if (!this.rulesheetExists(this.configFilePath)) { return; }
-            const content = fs.readFileSync(this.configFilePath, 'utf-8');
-            const config = JSON.parse(content) as ProjectConfig;
-            if (this.isActuallyWellParsed(config)) {
-                config.enabled = enabled;
-                fs.writeFileSync(this.configFilePath, JSON.stringify(config, null, 2), 'utf-8');
-            }
-        } catch (error) {
-            console.error("Error setting enabled state:", error);
-        }
-    }
 }
