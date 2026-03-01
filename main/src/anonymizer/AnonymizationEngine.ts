@@ -46,11 +46,8 @@ export class AnonymizationEngine {
 
         // Replace matches from end to start (prevents offset shifts)
         for (const match of matches) {
-            // Use the replacement label from the rule directly — no formatting, no index
-            const token = match.replacement;
-
-            // Store bidirectional mapping for later de-obfuscation
-            this.tokenManager.storeMapping(match.match, token);
+            // Always route token creation through TokenManager for consistency
+            const token = this.tokenManager.generateToken(match.replacement, match.match);
             mappings.set(match.match, token);
 
             // Replace the matched text with the token

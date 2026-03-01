@@ -142,7 +142,7 @@
           :class="'toast--' + toast.type"
           role="status"
         >
-          <span class="codicon" :class="toast.type === 'success' ? 'codicon-check' : 'codicon-error'" aria-hidden="true"></span>
+          <span class="codicon" :class="toastIconClass(toast.type)" aria-hidden="true"></span>
           {{ toast.message }}
         </div>
       </TransitionGroup>
@@ -189,13 +189,27 @@ export interface RuleRow {
 interface Toast {
   id: number;
   message: string;
-  type: 'success' | 'error';
+  type: 'success' | 'error' | 'warning';
+}
+
+interface ValidationFeedback {
+  level: 'error' | 'warning';
+  source: 'saveRules' | 'saveSingleRule' | 'unknown';
+  messages: string[];
+  timestamp: number;
+}
+
+interface SaveAck {
+  ruleIds: string[];
+  timestamp: number;
 }
 
 const props = defineProps<{
   rules: { id: string; pattern: string; replacement: string }[];
   pendingScannedRules?: { id: string; pattern: string; replacement: string }[];
   pendingImportedRules?: { id: string; pattern: string; replacement: string }[];
+  validationFeedback?: ValidationFeedback | null;
+  saveAck?: SaveAck | null;
 }>();
 
 const emit = defineEmits<{
@@ -266,6 +280,12 @@ function showToast(message: string, type: Toast['type'] = 'success') {
   setTimeout(() => {
     toasts.value = toasts.value.filter(t => t.id !== id);
   }, 3500);
+}
+
+function toastIconClass(type: Toast['type']): string {
+  if (type === 'success') return 'codicon-check';
+  if (type === 'warning') return 'codicon-warning';
+  return 'codicon-error';
 }
 
 watch(
@@ -360,6 +380,43 @@ watch(
   { deep: true }
 );
 
+watch(
+  () => props.validationFeedback,
+  feedback => {
+    if (!feedback || !Array.isArray(feedback.messages) || feedback.messages.length === 0) return;
+    const toastType: Toast['type'] = feedback.level === 'warning' ? 'warning' : 'error';
+    for (const msg of feedback.messages.slice(0, 4)) {
+      showToast(msg, toastType);
+    }
+  },
+  { deep: true }
+);
+
+watch(
+  () => props.saveAck,
+  ack => {
+    if (!ack) return;
+
+    if (ack.ruleIds.length === 0) {
+      return;
+    }
+
+    const next = new Set(dirtyIds.value);
+    let clearedCount = 0;
+    for (const id of ack.ruleIds) {
+      if (next.delete(id)) {
+        clearedCount++;
+      }
+    }
+    dirtyIds.value = next;
+
+    if (clearedCount > 0) {
+      showToast(`${clearedCount} rule${clearedCount !== 1 ? 's' : ''} saved.`);
+    }
+  },
+  { deep: true }
+);
+
 function generateId(): string {
   return `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -409,17 +466,21 @@ function saveSingleRule(ruleId: string) {
   const rule = localRules.value.find(r => r.id === ruleId);
   if (!rule || (rule.pattern.trim() === '' && rule.replacement.trim() === '')) return;
 
+  if (!rule.pattern.trim()) {
+    showToast('Pattern is required before saving.', 'error');
+    return;
+  }
+
+  if (!rule.replacement.trim()) {
+    showToast('Replacement is required before saving.', 'error');
+    return;
+  }
+
   emit('saveSingleRule', {
     id: rule.id,
     pattern: rule.pattern.trim(),
     replacement: rule.replacement.trim(),
   });
-
-  const next = new Set(dirtyIds.value);
-  next.delete(rule.id);
-  dirtyIds.value = next;
-
-  showToast('Rule saved.');
 }
 
 function confirmRules() {
@@ -427,11 +488,20 @@ function confirmRules() {
     .filter(r => r.pattern.trim() !== '' || r.replacement.trim() !== '')
     .map(r => ({ id: r.id, pattern: r.pattern.trim(), replacement: r.replacement.trim() }));
 
+  for (const rule of validRules) {
+    if (!rule.pattern) {
+      showToast('Cannot save: one or more rules are missing a pattern.', 'error');
+      return;
+    }
+    if (!rule.replacement) {
+      showToast('Cannot save: one or more rules are missing a replacement.', 'error');
+      return;
+    }
+  }
+
   localRules.value = validRules;
-  dirtyIds.value = new Set();
 
   emit('saveRules', validRules);
-  showToast(`${validRules.length} rule${validRules.length !== 1 ? 's' : ''} saved.`);
 }
 
 function exportRules() {
@@ -658,6 +728,12 @@ function exportRules() {
   background-color: var(--vscode-inputValidation-errorBackground);
   color: var(--vscode-inputValidation-errorForeground, var(--vscode-errorForeground));
   border: 1px solid var(--vscode-inputValidation-errorBorder);
+}
+
+.toast--warning {
+  background-color: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.08));
+  color: var(--vscode-editor-foreground);
+  border: 1px solid var(--vscode-inputValidation-warningBorder, #cca700);
 }
 
 .dialog-overlay {

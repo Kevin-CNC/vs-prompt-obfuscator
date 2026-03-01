@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ConfigManager } from '../utils/ConfigManager';
+import { validateRules } from '../anonymizer/RuleValidator';
 
 export class mainUIProvider {
     private static currentPanel: vscode.WebviewPanel | undefined;
@@ -70,9 +71,42 @@ export class mainUIProvider {
                 case 'saveRules': {
                     if (!configManager) { break; }
                     const rules = mainUIProvider.normalizeRules(message.rules as any[]);
+
+                    const validation = validateRules(rules);
+                    if (!validation.valid) {
+                        panel.webview.postMessage({
+                            command: 'ruleValidation',
+                            level: 'error',
+                            source: 'saveRules',
+                            messages: validation.errors,
+                        });
+                        vscode.window.showErrorMessage('Rule validation failed. Fix invalid regex or replacement values before saving.');
+                        break;
+                    }
+
+                    if (validation.warnings.length > 0) {
+                        panel.webview.postMessage({
+                            command: 'ruleValidation',
+                            level: 'warning',
+                            source: 'saveRules',
+                            messages: validation.warnings,
+                        });
+
+                        const answer = await vscode.window.showWarningMessage(
+                            `Rule warnings detected (${validation.warnings.length}). Save anyway?`,
+                            { modal: true },
+                            'Save Anyway',
+                            'Cancel'
+                        );
+
+                        if (answer !== 'Save Anyway') {
+                            break;
+                        }
+                    }
+
                     await configManager.saveProjectRules(rules);
                     mainUIProvider.onConfigChanged?.();
-                    panel.webview.postMessage({ command: 'rulesSaved' });
+                    panel.webview.postMessage({ command: 'rulesSaved', ruleIds: rules.map(r => r.id) });
                     break;
                 }
 
@@ -105,10 +139,42 @@ export class mainUIProvider {
                         console.log("Adding new rule:", normalizedRule);
                     }
 
+                    const validation = validateRules(currentRules);
+                    if (!validation.valid) {
+                        panel.webview.postMessage({
+                            command: 'ruleValidation',
+                            level: 'error',
+                            source: 'saveSingleRule',
+                            messages: validation.errors,
+                        });
+                        vscode.window.showErrorMessage('Rule validation failed. Fix invalid regex or replacement values before saving.');
+                        break;
+                    }
+
+                    if (validation.warnings.length > 0) {
+                        panel.webview.postMessage({
+                            command: 'ruleValidation',
+                            level: 'warning',
+                            source: 'saveSingleRule',
+                            messages: validation.warnings,
+                        });
+
+                        const answer = await vscode.window.showWarningMessage(
+                            `Rule warnings detected (${validation.warnings.length}). Save anyway?`,
+                            { modal: true },
+                            'Save Anyway',
+                            'Cancel'
+                        );
+
+                        if (answer !== 'Save Anyway') {
+                            break;
+                        }
+                    }
+
                     // Save to disk (ConfigManager will handle pattern normalization)
                     await configManager.saveProjectRules(currentRules);
                     mainUIProvider.onConfigChanged?.();
-                    panel.webview.postMessage({ command: 'rulesSaved' });
+                    panel.webview.postMessage({ command: 'rulesSaved', ruleIds: [normalizedRule.id] });
                     break;
                 }
 

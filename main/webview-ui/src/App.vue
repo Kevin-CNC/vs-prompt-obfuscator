@@ -18,6 +18,8 @@
       :rules="rules"
       :pending-scanned-rules="pendingScannedRules"
       :pending-imported-rules="pendingImportedRules"
+      :validation-feedback="validationFeedback"
+      :save-ack="saveAck"
       @save-rules="handleSaveRules"
       @save-single-rule="handleSaveSingleRule"
       @delete-rule="handleDeleteRule"
@@ -62,7 +64,22 @@ interface SimpleRule {
   pattern: string;
   replacement: string;
 }
+
+interface ValidationFeedback {
+  level: 'error' | 'warning';
+  source: 'saveRules' | 'saveSingleRule' | 'unknown';
+  messages: string[];
+  timestamp: number;
+}
+
+interface SaveAck {
+  ruleIds: string[];
+  timestamp: number;
+}
+
 const rules = ref<SimpleRule[]>([]);
+const validationFeedback = ref<ValidationFeedback | null>(null);
+const saveAck = ref<SaveAck | null>(null);
 
 function handleSaveRules(newRules: SimpleRule[]) {
   rules.value = newRules;
@@ -113,6 +130,20 @@ window.addEventListener('message', (event) => {
       break;
     case 'importedRules':
       pendingImportedRules.value = msg.rules ?? [];
+      break;
+    case 'ruleValidation':
+      validationFeedback.value = {
+        level: msg.level === 'warning' ? 'warning' : 'error',
+        source: msg.source === 'saveRules' || msg.source === 'saveSingleRule' ? msg.source : 'unknown',
+        messages: Array.isArray(msg.messages) ? msg.messages : [],
+        timestamp: Date.now(),
+      };
+      break;
+    case 'rulesSaved':
+      saveAck.value = {
+        ruleIds: Array.isArray(msg.ruleIds) ? msg.ruleIds : [],
+        timestamp: Date.now(),
+      };
       break;
   }
 });

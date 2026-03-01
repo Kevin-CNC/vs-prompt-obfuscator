@@ -21,8 +21,13 @@ export class TokenManager {
         const count = (this.counters.get(type) || 0) + 1;
         this.counters.set(type, count);
 
-        // Generate new token
-        const token = this.formatToken(type, count);
+        // Generate a new unique token from the supplied template/type
+        let token = this.formatToken(type, count);
+        while (this.reverseMappings.has(token)) {
+            const nextCount = (this.counters.get(type) || count) + 1;
+            this.counters.set(type, nextCount);
+            token = this.formatToken(type, nextCount);
+        }
 
         // Store bidirectional mapping
         this.mappings.set(originalValue, token);
@@ -48,26 +53,32 @@ export class TokenManager {
     }
 
     private formatToken(type: string, index: number): string {
-        // Format tokens based on type
+        if (type.includes('{index}')) {
+            return type.replace(/\{index\}/g, String(index));
+        }
+
+        // Backward-compatible formatting for built-in type names
         switch(type.toLowerCase()) {
             case 'ip':
                 return `IP_${index}`;
             case 'email':
                 return `USER_${String.fromCharCode(64 + index)}@domain.tld`;
             case 'api-key':
-                return `API_KEY_v${index}`;
+                return `API_KEY_${index}`;
             case 'uuid':
                 return `UUID_${index}`;
             case 'secret':
                 return `SECRET_${index}`;
             case 'jwt':
                 return `JWT_TOKEN_${index}`;
+            case 'private-key':
+                return `PRIVATE_KEY_${index}`;
             case 'path':
                 return `/PATH_${index}`;
             default:
-                // Custom replacement labels are used as-is (user already named the token)
-                // Only append index if there are multiple distinct values under the same label
-                return index > 1 ? `${type.toUpperCase()}_${index}` : `${type.toUpperCase()}`;
+                // Custom replacement labels are used as-is.
+                // Add a suffix only when multiple distinct values share the same label.
+                return index > 1 ? `${type}_${index}` : type;
         }
     }
 
