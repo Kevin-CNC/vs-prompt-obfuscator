@@ -1,6 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <rect width="100" height="100" fill="#2d5ba3" rx="15"/>
-  <path d="M 30 35 L 50 50 L 30 65 M 55 50 L 75 50" stroke="white" stroke-width="6" stroke-linecap="round" fill="none"/>
-  <circle cx="30" cy="50" r="3" fill="white"/>
-  <circle cx="75" cy="50" r="3" fill="white"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- Shield ring (outline via evenodd inner/outer paths) -->
+  <path fill="#c5c5c5" fill-rule="evenodd" clip-rule="evenodd"
+    d="M8 0.75L1.5 3.25V8C1.5 12.1 4.5 14.8 8 15.75C11.5 14.8 14.5 12.1 14.5 8V3.25L8 0.75Z
+       M8 2.35L3 4.65V8C3 11.4 5.4 13.5 8 14.4C10.6 13.5 13 11.4 13 8V4.65L8 2.35Z" />
+  <!-- Lock body -->
+  <rect fill="#c5c5c5" x="6" y="9.75" width="4" height="2.75" rx="0.5"/>
+  <!-- Lock shackle (thick arch as filled ring segment) -->
+  <path fill="#c5c5c5" fill-rule="evenodd" clip-rule="evenodd"
+    d="M6 9.75V8.25A2 2 0 0 1 10 8.25V9.75H9V8.25A1 1 0 0 0 7 8.25V9.75Z"/>
+  <!-- Keyhole dot -->
+  <circle fill="#c5c5c5" cx="8" cy="11" r="0.6"/>
 </svg>
