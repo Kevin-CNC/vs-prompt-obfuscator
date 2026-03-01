@@ -7,8 +7,12 @@ import { mainUIProvider } from './ui/mainUiProvider';
 import { RuleEditorProvider } from './ui/RuleEditorProvider';
 import { MappingsViewProvider } from './ui/MappingsViewProvider';
 import { CommandExecutor } from './tools/CommandExecutor';
+import { ScpTransferTool } from './tools/ScpTransferTool';
 import { IacScanner } from './scanner/IacScanner';
 import * as fs from 'fs';
+
+// Module-level reference for cleanup in deactivate().
+let commandExecutorInstance: CommandExecutor | undefined;
 
 function updateDevFiles(rulesheetRelativePath: string) {
     const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -112,21 +116,48 @@ export async function activate(context: vscode.ExtensionContext) {
     const configs = new ConfigManager(selectedFile.fsPath);
     const anonymizationEngine = new AnonymizationEngine(tokenManager, configs);
     const commandExecutor = new CommandExecutor(tokenManager);
+    commandExecutorInstance = commandExecutor;
+    const scpTransferTool = new ScpTransferTool(commandExecutor);
 
     // Create mappingsViewProvider early so the chat participant can refresh it.
     const mappingsViewProvider = new MappingsViewProvider(tokenManager);
 
     const toolDisposable = vscode.lm.registerTool('prompthider_execute_command', commandExecutor);
-    context.subscriptions.push(toolDisposable);
+    const scpToolDisposable = vscode.lm.registerTool('prompthider_scp_transfer', scpTransferTool);
+    context.subscriptions.push(toolDisposable, scpToolDisposable);
 
     function getToolDefinitions(): vscode.LanguageModelChatTool[] {
         return vscode.lm.tools
-            .filter(t => t.name === 'prompthider_execute_command')
+            .filter(t => t.name.startsWith('prompthider_'))
             .map(t => ({
                 name: t.name,
                 description: t.description,
                 inputSchema: t.inputSchema ?? {}
             }));
+    }
+
+    // Reads each URI-based file reference, anonymizes its content, and returns
+    // formatted code-fence strings ready to be appended to a user message.
+    async function processFileReferences(
+        references: readonly vscode.ChatPromptReference[]
+    ): Promise<string[]> {
+        const contextParts: string[] = [];
+        for (const ref of references) {
+            if (ref.value instanceof vscode.Uri) {
+                try {
+                    const bytes = await vscode.workspace.fs.readFile(ref.value);
+                    const content = Buffer.from(bytes).toString('utf8');
+                    const anonResult = await anonymizationEngine.anonymize(content);
+                    const fileName = path.basename(ref.value.fsPath);
+                    contextParts.push(
+                        `[Attached file: ${fileName}]\n\`\`\`\n${anonResult.anonymized}\n\`\`\``
+                    );
+                } catch {
+                    // Unreadable file — skip silently
+                }
+            }
+        }
+        return contextParts;
     }
 
     const chatParticipant = vscode.chat.createChatParticipant('prompthider', async (request, chatContext, stream, token) => {
@@ -143,7 +174,11 @@ export async function activate(context: vscode.ExtensionContext) {
         for (const turn of chatContext.history) {
             if (turn instanceof vscode.ChatRequestTurn) {
                 const histResult = await anonymizationEngine.anonymize(turn.prompt);
-                messages.push(vscode.LanguageModelChatMessage.User(histResult.anonymized));
+                const histFileParts = await processFileReferences(turn.references);
+                const histParts = histFileParts.length > 0
+                    ? `${histResult.anonymized}\n\n${histFileParts.join('\n\n')}`
+                    : histResult.anonymized;
+                messages.push(vscode.LanguageModelChatMessage.User(histParts));
             } else if (turn instanceof vscode.ChatResponseTurn) {
                 const responseText = turn.response
                     .filter((part): part is vscode.ChatResponseMarkdownPart =>
@@ -156,7 +191,16 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         }
 
-        messages.push(vscode.LanguageModelChatMessage.User(result.anonymized));
+        // Process any file/script attachments on the current turn
+        const fileParts = await processFileReferences(request.references);
+        if (fileParts.length > 0) {
+            stream.markdown(`> **PromptHider**: ${fileParts.length} file(s) attached and anonymized.\n\n`);
+        }
+
+        const currentUserMessage = fileParts.length > 0
+            ? `${result.anonymized}\n\n${fileParts.join('\n\n')}`
+            : result.anonymized;
+        messages.push(vscode.LanguageModelChatMessage.User(currentUserMessage));
 
         // Inject active token names so the model uses them verbatim
         const activeTokens = tokenManager.getAllMappings();
@@ -346,6 +390,8 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+    commandExecutorInstance?.dispose();
+    commandExecutorInstance = undefined;
     console.log('VS Prompt Hider deactivated');
 }
 
