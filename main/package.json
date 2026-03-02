@@ -185,6 +185,17 @@
             "all"
           ],
           "description": "Controls which language-model tools are exposed to @PromptHider."
+        },
+        "prompthider.logging.level": {
+          "type": "string",
+          "default": "warn",
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug"
+          ],
+          "description": "Controls PromptHider diagnostic logging verbosity for output channel and local .prompthider logs."
         }
       }
     },

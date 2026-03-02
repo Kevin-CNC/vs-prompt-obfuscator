@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AnonymizationRule } from '../anonymizer/PatternLibrary';
+import { PromptHiderLogger } from './PromptHiderLogger';
 
 export interface ProjectConfig {
     version: string;
@@ -40,6 +41,10 @@ export class ConfigManager {
             return config;
         } catch (error) {
             console.error("Error loading config:", error);
+            PromptHiderLogger.error('Failed to load PromptHider config.', {
+                filePath: this.configFilePath,
+                reason: error instanceof Error ? error.message : String(error),
+            });
             return this.getDefaultConfig();
         }
     }
@@ -106,6 +111,10 @@ export class ConfigManager {
 
         }catch(error){
             console.error("Error loading project rules:", error);
+            PromptHiderLogger.error('Failed to load project rules.', {
+                filePath: this.configFilePath,
+                reason: error instanceof Error ? error.message : String(error),
+            });
             return [];
         }
     }
@@ -134,6 +143,10 @@ export class ConfigManager {
 
         }catch(error){
             console.error("Error saving project rules:", error);
+            PromptHiderLogger.error('Failed to save project rules.', {
+                filePath: this.configFilePath,
+                reason: error instanceof Error ? error.message : String(error),
+            });
             vscode.window.showInformationMessage(`An error occurred while saving your new rules.`);
         }
     }

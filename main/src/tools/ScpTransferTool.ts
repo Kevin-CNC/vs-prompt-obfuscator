@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { CommandExecutor } from './CommandExecutor';
+import { PromptHiderLogger } from '../utils/PromptHiderLogger';
 
 // ── Input schema (mirrors package.json declaration) ──────
 
@@ -55,6 +56,10 @@ export class ScpTransferTool implements vscode.LanguageModelTool<ScpTransferInpu
                 );
 
             if (mode === 'terminal') {
+                PromptHiderLogger.info('SCP command handed off to terminal mode.', {
+                    source,
+                    destination,
+                });
                 return new vscode.LanguageModelToolResult([
                     new vscode.LanguageModelTextPart(
                         'SCP command sent to the PromptHider terminal for interactive/background execution. No captured transfer output is available in terminal mode.'
@@ -83,6 +88,11 @@ export class ScpTransferTool implements vscode.LanguageModelTool<ScpTransferInpu
             }
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
+            PromptHiderLogger.error('SCP transfer invocation failed.', {
+                source,
+                destination,
+                error: msg,
+            });
             return new vscode.LanguageModelToolResult([
                 new vscode.LanguageModelTextPart(`Transfer error: ${msg}`)
             ]);
