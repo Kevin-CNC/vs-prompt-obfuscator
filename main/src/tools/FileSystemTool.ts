@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { AnonymizationEngine } from '../anonymizer/AnonymizationEngine';
 import { TokenManager } from '../anonymizer/TokenManager';
@@ -12,6 +13,7 @@ export interface FileSystemInput {
     content?: string;
     old_text?: string;
     new_text?: string;
+    replace_all?: boolean;
     recursive?: boolean;
 }
 
@@ -79,7 +81,7 @@ export class FileSystemTool implements vscode.LanguageModelTool<FileSystemInput>
                 case 'write':
                     return await this.writeFile(targetUri, input.content);
                 case 'patch':
-                    return await this.patchFile(targetUri, input.old_text, input.new_text);
+                    return await this.patchFile(targetUri, input.old_text, input.new_text, input.replace_all ?? false);
                 case 'delete':
                     return await this.deletePath(targetUri, input.recursive ?? false);
                 case 'list':
@@ -119,11 +121,16 @@ export class FileSystemTool implements vscode.LanguageModelTool<FileSystemInput>
         const realContent = this.deAnonymize(content);
         await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(targetUri.fsPath)));
         const data = Buffer.from(realContent, 'utf8');
-        await vscode.workspace.fs.writeFile(targetUri, data);
+
+        const usedWorkspaceEdit = await this.tryWriteUsingWorkspaceEdit(targetUri, realContent);
+        if (!usedWorkspaceEdit) {
+            await vscode.workspace.fs.writeFile(targetUri, data);
+        }
 
         PromptHiderLogger.info('Filesystem write completed.', {
             targetPath: targetUri.fsPath,
             bytes: data.byteLength,
+            mode: usedWorkspaceEdit ? 'workspaceEdit' : 'filesystem',
         });
 
         return this.textResult(`File written: ${targetUri.fsPath} (${data.byteLength} bytes)`);
@@ -132,7 +139,8 @@ export class FileSystemTool implements vscode.LanguageModelTool<FileSystemInput>
     private async patchFile(
         targetUri: vscode.Uri,
         oldText: string | undefined,
-        newText: string | undefined
+        newText: string | undefined,
+        replaceAll: boolean = false
     ): Promise<vscode.LanguageModelToolResult> {
         if (typeof oldText !== 'string' || oldText.length === 0) {
             return this.errorResult('`old_text` must be a non-empty string for patch operations.');
@@ -147,20 +155,36 @@ export class FileSystemTool implements vscode.LanguageModelTool<FileSystemInput>
         const realOldText = this.deAnonymize(oldText);
         const realNewText = this.deAnonymize(newText);
 
-        const occurrenceCount = this.countOccurrences(currentContent, realOldText);
+        const occurrenceIndexes = this.findOccurrenceIndexes(currentContent, realOldText);
+        const occurrenceCount = occurrenceIndexes.length;
         if (occurrenceCount === 0) {
             return this.errorResult('`old_text` was not found in the target file.');
         }
 
-        const updatedContent = currentContent.split(realOldText).join(realNewText);
-        await vscode.workspace.fs.writeFile(targetUri, Buffer.from(updatedContent, 'utf8'));
+        if (!replaceAll && occurrenceCount > 1) {
+            return this.errorResult(
+                `Patch is ambiguous: found ${occurrenceCount} matches for old_text. Set replace_all=true to replace every occurrence.`
+            );
+        }
+
+        const updatedContent = replaceAll
+            ? currentContent.split(realOldText).join(realNewText)
+            : this.replaceAt(currentContent, occurrenceIndexes[0], realOldText.length, realNewText);
+
+        const usedWorkspaceEdit = await this.tryWriteUsingWorkspaceEdit(targetUri, updatedContent);
+        if (!usedWorkspaceEdit) {
+            await vscode.workspace.fs.writeFile(targetUri, Buffer.from(updatedContent, 'utf8'));
+        }
 
         PromptHiderLogger.info('Filesystem patch completed.', {
             targetPath: targetUri.fsPath,
             occurrenceCount,
+            replaceAll,
+            mode: usedWorkspaceEdit ? 'workspaceEdit' : 'filesystem',
         });
 
-        return this.textResult(`Patched ${occurrenceCount} occurrence(s) in ${targetUri.fsPath}`);
+        const appliedCount = replaceAll ? occurrenceCount : 1;
+        return this.textResult(`Patched ${appliedCount} occurrence(s) in ${targetUri.fsPath}`);
     }
 
     private async deletePath(targetUri: vscode.Uri, recursive: boolean): Promise<vscode.LanguageModelToolResult> {
@@ -212,8 +236,7 @@ export class FileSystemTool implements vscode.LanguageModelTool<FileSystemInput>
             : [...workspaceFolders];
 
         const roots = orderedFolders.map(folder => path.resolve(folder.uri.fsPath));
-        const baseRoot = roots[0];
-        const absoluteTarget = this.toAbsolutePath(normalizedInput, baseRoot);
+        const absoluteTarget = this.resolveAgainstWorkspaceRoots(normalizedInput, roots);
 
         const allowed = roots.some(root => this.isPathWithin(root, absoluteTarget));
         if (!allowed) {
@@ -221,6 +244,28 @@ export class FileSystemTool implements vscode.LanguageModelTool<FileSystemInput>
         }
 
         return absoluteTarget;
+    }
+
+    private resolveAgainstWorkspaceRoots(inputPath: string, roots: string[]): string {
+        const shouldTryEachRoot = !path.isAbsolute(inputPath)
+            || (process.platform === 'win32' && this.isWindowsRootRelative(inputPath));
+
+        if (!shouldTryEachRoot) {
+            return path.resolve(inputPath);
+        }
+
+        const candidates = roots.map(root => this.toAbsolutePath(inputPath, root));
+        const existingTarget = candidates.find(candidate => this.existsOnDisk(candidate));
+        if (existingTarget) {
+            return existingTarget;
+        }
+
+        const existingParent = candidates.find(candidate => this.existsOnDisk(path.dirname(candidate)));
+        if (existingParent) {
+            return existingParent;
+        }
+
+        return candidates[0];
     }
 
     private normalizeInputPath(inputPath: string): string {
@@ -269,8 +314,8 @@ export class FileSystemTool implements vscode.LanguageModelTool<FileSystemInput>
         return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}${path.sep}`);
     }
 
-    private countOccurrences(text: string, needle: string): number {
-        let count = 0;
+    private findOccurrenceIndexes(text: string, needle: string): number[] {
+        const indexes: number[] = [];
         let index = 0;
 
         while (true) {
@@ -278,11 +323,34 @@ export class FileSystemTool implements vscode.LanguageModelTool<FileSystemInput>
             if (index === -1) {
                 break;
             }
-            count++;
+
+            indexes.push(index);
             index += needle.length;
         }
 
-        return count;
+        return indexes;
+    }
+
+    private replaceAt(text: string, start: number, length: number, replacement: string): string {
+        return `${text.slice(0, start)}${replacement}${text.slice(start + length)}`;
+    }
+
+    private existsOnDisk(filePath: string): boolean {
+        return fs.existsSync(filePath);
+    }
+
+    private async tryWriteUsingWorkspaceEdit(targetUri: vscode.Uri, content: string): Promise<boolean> {
+        const openDoc = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === targetUri.toString());
+        if (!openDoc) {
+            return false;
+        }
+
+        const edit = new vscode.WorkspaceEdit();
+        const endPosition = openDoc.lineCount === 0
+            ? new vscode.Position(0, 0)
+            : openDoc.lineAt(openDoc.lineCount - 1).range.end;
+        edit.replace(openDoc.uri, new vscode.Range(new vscode.Position(0, 0), endPosition), content);
+        return vscode.workspace.applyEdit(edit);
     }
 
     private deAnonymize(text: string): string {
