@@ -192,6 +192,16 @@
         "command": "prompthider.switchRulesheet",
         "title": "Switch Active Rulesheet",
         "category": "Prompt Hider"
+      },
+      {
+        "command": "prompthider.quickAddRule",
+        "title": "PromptHider: Quick Add Rule"
+      }
+    ],
+    "keybindings": [
+      {
+        "key": "ctrl+shift+a",
+        "command": "prompthider.quickAddRule"
       }
     ],
     "configuration": {
