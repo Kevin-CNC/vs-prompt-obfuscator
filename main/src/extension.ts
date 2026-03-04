@@ -12,6 +12,7 @@ import { FileSystemTool } from './tools/FileSystemTool';
 import { IacScanner } from './scanner/IacScanner';
 import { PromptHiderLogger } from './utils/PromptHiderLogger';
 import * as fs from 'fs';
+import { AnonymizationRule } from './anonymizer/PatternLibrary';
 
 let commandExecutorInstance: CommandExecutor | undefined;
 
@@ -761,8 +762,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             };
 
 
+            // Actually add the rule to the path
+            const configPath = await configManager.getConfigFilePath();
+            if (!configPath) {
+                vscode.window.showErrorMessage('PromptHider: No config found or created.');
+                return;
+            }
 
-            
+            // Get current configs and add the new rule
+            const currentConfigs = await configManager.loadFullConfig();
+
+            const newlyCreatedRule:AnonymizationRule = {
+                id: `rule_${Math.floor(Math.random() * 10000)}`,
+                type: "custom",
+                pattern:patternToObfuscate,
+                replacement: givenReplacement,
+                enabled: true,
+                description: `${patternToObfuscate} → ${givenReplacement} (added via quick-add)`,
+            }
+
+            if (currentConfigs) {
+                currentConfigs?.rules.push(newlyCreatedRule);
+                await configManager.saveProjectRules(currentConfigs.rules);
+                vscode.window.showInformationMessage(`New rule added and saved: ${patternToObfuscate} → ${givenReplacement}`);
+            };
         })
     );
 }3
