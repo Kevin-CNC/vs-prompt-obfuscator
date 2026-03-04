@@ -724,6 +724,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         openRuleEditorCommand,
         scanIacFileCommand
     );
+
+
+    // quick-add rule command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('prompthider.quickAddRule', async () => {
+            const editor = vscode.window.activeTextEditor;
+            const selection = editor?.selection;
+            const selectedText = selection && !selection.isEmpty
+            
+        })
+    );
 }
 
 export function deactivate(): void {
