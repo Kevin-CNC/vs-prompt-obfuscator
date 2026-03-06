@@ -8,9 +8,11 @@ import { RuleEditorProvider } from './ui/RuleEditorProvider';
 import { MappingsViewProvider } from './ui/MappingsViewProvider';
 import { CommandExecutor } from './tools/CommandExecutor';
 import { ScpTransferTool } from './tools/ScpTransferTool';
+import { FileSystemTool } from './tools/FileSystemTool';
 import { IacScanner } from './scanner/IacScanner';
 import { PromptHiderLogger } from './utils/PromptHiderLogger';
 import * as fs from 'fs';
+import { AnonymizationRule } from './anonymizer/PatternLibrary';
 
 let commandExecutorInstance: CommandExecutor | undefined;
 
@@ -280,6 +282,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     commandExecutorInstance = commandExecutor;
 
     const scpTransferTool = new ScpTransferTool(commandExecutor);
+    const fileSystemTool = new FileSystemTool(anonymizationEngine, tokenManager);
+    if (activeWorkspaceFolder) {
+        fileSystemTool.setWorkspaceScope(activeWorkspaceFolder.uri);
+    }
     const mappingsViewProvider = new MappingsViewProvider(tokenManager);
 
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
@@ -347,6 +353,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         configManager.setConfigFilePath(activeRulesheetUri.fsPath);
         commandExecutor.setConfigurationScope(activeWorkspaceFolder.uri);
+        fileSystemTool.setWorkspaceScope(activeWorkspaceFolder.uri);
         PromptHiderLogger.setWorkspaceRoot(activeWorkspaceFolder.uri.fsPath);
         PromptHiderLogger.configure(activeWorkspaceFolder.uri);
 
@@ -401,7 +408,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     const toolDisposable = vscode.lm.registerTool('prompthider_execute_command', commandExecutor);
     const scpToolDisposable = vscode.lm.registerTool('prompthider_scp_transfer', scpTransferTool);
-    context.subscriptions.push(toolDisposable, scpToolDisposable);
+    const fileSystemToolDisposable = vscode.lm.registerTool('prompthider_filesystem', fileSystemTool);
+    context.subscriptions.push(toolDisposable, scpToolDisposable, fileSystemToolDisposable);
 
     const chatParticipant = vscode.chat.createChatParticipant('prompthider', async (request, chatContext, stream, token) => {
         const hasRulesheet = await ensureActiveRulesheet('chat');
@@ -717,7 +725,71 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         openRuleEditorCommand,
         scanIacFileCommand
     );
-}
+
+
+    // quick-add rule command
+    context.subscriptions.push(
+        vscode.commands.registerCommand('prompthider.quickAddRule', async () => {
+            const editor = vscode.window.activeTextEditor;
+            const selection = editor?.selection;
+            const selectedText = selection && !selection.isEmpty ? editor.document.getText(selection) : undefined;
+
+            if (!selectedText) {
+                return vscode.window.showInformationMessage('Select text first to create a rule from it.');
+            }
+
+            const patternToObfuscate = await vscode.window.showInputBox({
+                    prompt: "Is this the patter you want to obfuscate? Edit if needed, or leave as is.",
+                    value: selectedText, // Pre-fill with highlighted text
+                    ignoreFocusOut: true,
+                });
+
+            if (!patternToObfuscate) { 
+                vscode.window.showInformationMessage('Select text first to create a rule from it.');
+                return;
+            };
+
+            const givenReplacement = await vscode.window.showInputBox({
+                prompt: 'Enter replacement word/phrase.',
+                value: '',
+                placeHolder: '',
+                ignoreFocusOut: true
+            })
+
+            if (!givenReplacement) { 
+                vscode.window.showInformationMessage('You must provide a replacement.');
+                return;
+            };
+
+
+            // Actually add the rule to the path
+            const configPath = await configManager.getConfigFilePath();
+            if (!configPath) {
+                vscode.window.showErrorMessage('PromptHider: No config found or created.');
+                return;
+            }
+
+            // Get current configs and add the new rule
+            const currentConfigs = await configManager.loadFullConfig();
+
+            const newlyCreatedRule:AnonymizationRule = {
+                id: `rule_${Math.floor(Math.random() * 10000)}`,
+                type: "custom",
+                pattern:patternToObfuscate,
+                replacement: givenReplacement,
+                enabled: true,
+                description: `${patternToObfuscate} → ${givenReplacement} (added via quick-add)`,
+            }
+
+            if (currentConfigs) {
+                currentConfigs?.rules.push(newlyCreatedRule);
+                await configManager.saveProjectRules(currentConfigs.rules);
+                vscode.window.showInformationMessage(`New rule added and saved: ${patternToObfuscate} → ${givenReplacement}`);
+                mainUIProvider.refreshRules();
+            };
+        })
+    );
+}3
 
 export function deactivate(): void {
     commandExecutorInstance?.dispose();
