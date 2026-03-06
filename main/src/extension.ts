@@ -785,6 +785,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 currentConfigs?.rules.push(newlyCreatedRule);
                 await configManager.saveProjectRules(currentConfigs.rules);
                 vscode.window.showInformationMessage(`New rule added and saved: ${patternToObfuscate} → ${givenReplacement}`);
+                mainUIProvider.refreshRules();
             };
         })
     );
