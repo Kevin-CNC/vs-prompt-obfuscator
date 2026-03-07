@@ -23,6 +23,10 @@ export class mainUIProvider {
         this.postMessage({command: 'refreshRules'})
     }
 
+    public static isPanelOpen(): boolean {
+        return !!mainUIProvider.currentPanel;
+    }
+
     public static refreshCurrentPanel(): void {
         if (mainUIProvider.currentPanel && mainUIProvider.activeConfigManager) {
             void mainUIProvider.postInit(mainUIProvider.currentPanel.webview, mainUIProvider.activeConfigManager);
