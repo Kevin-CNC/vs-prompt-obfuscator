@@ -774,7 +774,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const currentConfigs = await configManager.loadFullConfig();
 
             const newlyCreatedRule:AnonymizationRule = {
-                id: `rule_${Math.floor(Math.random() * 10000)}`,
+                id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
                 type: "custom",
                 pattern:patternToObfuscate,
                 replacement: givenReplacement,
@@ -797,8 +797,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 }
 
                 await configManager.saveProjectRules(allRules);
-                vscode.window.showInformationMessage(`New rule added and saved: ${patternToObfuscate} → ${givenReplacement}`);
-                mainUIProvider.refreshRules();
+                if (mainUIProvider.isPanelOpen()) {
+                    mainUIProvider.refreshCurrentPanel();
+                    vscode.window.showInformationMessage(`Rule added and saved: ${patternToObfuscate} → ${givenReplacement}. Main panel refreshed.`);
+                } else {
+                    vscode.window.showInformationMessage(`Rule added and saved: ${patternToObfuscate} → ${givenReplacement}. Open the UI to view all rules.`);
+                }
             };
         })
     );
