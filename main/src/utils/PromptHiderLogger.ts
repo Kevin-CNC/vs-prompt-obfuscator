@@ -11,14 +11,14 @@ interface LogEntry {
     context?: unknown;
 }
 
-export class PromptHiderLogger {
-    private static output = vscode.window.createOutputChannel('PromptHider');
+export class CloakdLogger {
+    private static output = vscode.window.createOutputChannel('Cloakd');
     private static workspaceRoot: string | undefined;
     private static minLevel: LogLevel = 'warn';
-    private static readonly logFileName = 'prompthider.log.jsonl';
+    private static readonly logFileName = 'cloakd.log.jsonl';
 
     static configure(scopeUri?: vscode.Uri): void {
-        const cfg = vscode.workspace.getConfiguration('prompthider', scopeUri);
+        const cfg = vscode.workspace.getConfiguration('cloakd', scopeUri);
         const configured = cfg.get<string>('logging.level', 'warn');
         if (configured === 'error' || configured === 'warn' || configured === 'info' || configured === 'debug') {
             this.minLevel = configured;
@@ -89,7 +89,7 @@ export class PromptHiderLogger {
         }
 
         try {
-            const logDir = path.join(this.workspaceRoot, '.prompthider');
+            const logDir = path.join(this.workspaceRoot, '.cloakd');
             if (!fs.existsSync(logDir)) {
                 fs.mkdirSync(logDir, { recursive: true });
             }
