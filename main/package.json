@@ -6,7 +6,7 @@
   "publisher": "kevincaplescu",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Kevin-CNC/vs-prompt-hider.git"
+    "url": "https://github.com/Kevin-CNC/cloakd"
   },
   "engines": {
     "vscode": "^1.85.0"
