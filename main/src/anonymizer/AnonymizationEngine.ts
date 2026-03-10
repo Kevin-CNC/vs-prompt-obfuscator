@@ -17,23 +17,28 @@ export class AnonymizationEngine {
     private tokenManager: TokenManager;
     private configManager: ConfigManager;
     private patternMatcher: RegexPatternMatcher;
+    private lastRulesFingerprint: string | undefined;
 
     constructor(tokenManager: TokenManager, configManager: ConfigManager) {
         this.tokenManager = tokenManager;
         this.configManager = configManager;
         this.patternMatcher = new RegexPatternMatcher();
-        this.initializePatterns();
     }
 
-    private initializePatterns() {
-        // Get rules from config (reload fresh each time)
+    private initializePatterns(force = false): void {
+        const nextFingerprint = this.configManager.getRulesCacheFingerprint();
+        if (!force && this.lastRulesFingerprint === nextFingerprint) {
+            return;
+        }
+
         const rules = this.configManager.getRules();
         this.patternMatcher.build(rules);
+        this.lastRulesFingerprint = nextFingerprint;
     }
 
     async anonymize(text: string): Promise<AnonymizationResult> {
         try {
-            // Reload patterns fresh so any rule changes are picked up
+            // Refresh matcher only when rulesheet content changed.
             this.initializePatterns();
 
             // Find all pattern matches
@@ -81,6 +86,11 @@ export class AnonymizationEngine {
     }
 
     async detectPatterns(text: string): Promise<PatternMatch[]> {
+        this.initializePatterns();
         return this.patternMatcher.findMatches(text);
+    }
+
+    invalidatePatternCache(): void {
+        this.lastRulesFingerprint = undefined;
     }
 }
