@@ -17,6 +17,7 @@
     <!-- Rule Editor -->
     <RuleEditor
       :rules="rules"
+      :view-mode="viewMode"
       :pending-scanned-rules="pendingScannedRules"
       :pending-imported-rules="pendingImportedRules"
       :validation-feedback="validationFeedback"
@@ -25,6 +26,7 @@
       @save-single-rule="handleSaveSingleRule"
       @delete-rule="handleDeleteRule"
       @scan-iac-file="handleScanIacFile"
+      @open-main-ui="handleOpenMainUi"
       @scanned-rules-consumed="pendingScannedRules = []"
       @import-rules="handleImportRules"
       @export-rules="handleExportRules"
@@ -60,6 +62,7 @@ const vscode = acquireVsCodeApi();
 const rulesheetName = ref('Loading...');
 const workspaceName = ref('Loading...');
 const isLoading = ref(true);
+const viewMode = ref<'main' | 'sidebar'>('main');
 
 interface SimpleRule {
   id: string;
@@ -110,6 +113,10 @@ function handleScanIacFile() {
   vscode.postMessage({ command: 'scanIacFile' });
 }
 
+function handleOpenMainUi() {
+  vscode.postMessage({ command: 'openMainUi' });
+}
+
 function handleImportRules() {
   vscode.postMessage({ command: 'importRules' });
 }
@@ -128,6 +135,7 @@ window.addEventListener('message', (event) => {
     case 'init':
       workspaceName.value = msg.workspaceName ?? 'Unknown Workspace';
       rulesheetName.value = msg.rulesheetName ?? 'Unknown';
+      viewMode.value = msg.viewMode === 'sidebar' ? 'sidebar' : 'main';
       rules.value = msg.rules ?? [];
       isLoading.value = false;
       break;

@@ -165,6 +165,10 @@
         <span slot="start" class="codicon codicon-search"></span>
         Scan IaC File
       </vscode-button>
+      <vscode-button v-if="props.viewMode === 'sidebar'" appearance="secondary" @click="emit('openMainUi')" title="Open the full Cloakd panel">
+        <span slot="start" class="codicon codicon-window"></span>
+        Open Main UI
+      </vscode-button>
       <vscode-button
         appearance="secondary"
         @click="confirmRules"
@@ -252,6 +256,7 @@ interface SaveAck {
 
 const props = defineProps<{
   rules: RuleRow[];
+  viewMode?: 'main' | 'sidebar';
   pendingScannedRules?: RuleRow[];
   pendingImportedRules?: RuleRow[];
   validationFeedback?: ValidationFeedback | null;
@@ -263,6 +268,7 @@ const emit = defineEmits<{
   (e: 'saveSingleRule', rule: RuleRow): void;
   (e: 'deleteRule', ruleId: string): void;
   (e: 'scanIacFile'): void;
+  (e: 'openMainUi'): void;
   (e: 'importRules'): void;
   (e: 'exportRules', rules: RuleRow[]): void;
   (e: 'scannedRulesConsumed'): void;
@@ -287,7 +293,9 @@ const filteredRules = computed(() => {
   if (!searchQuery.value.trim()) return localRules.value;
   const q = searchQuery.value.toLowerCase();
   return localRules.value.filter(r =>
-    r.pattern.toLowerCase().includes(q) || r.replacement.toLowerCase().includes(q)
+    r.pattern.toLowerCase().includes(q) ||
+    r.replacement.toLowerCase().includes(q) ||
+    (r.description ?? '').toLowerCase().includes(q)
   );
 });
 
@@ -301,6 +309,7 @@ watch([localRules, searchQuery], () => {
   const allValues = [
     ...localRules.value.map(r => r.pattern.trim()),
     ...localRules.value.map(r => r.replacement.trim()),
+    ...localRules.value.map(r => (r.description ?? '').trim()),
   ].filter(Boolean);
 
   suggestions.value = Array.from(new Set(allValues)).filter(v => v.toLowerCase().includes(q));
@@ -748,6 +757,7 @@ function exportRules() {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px 20px;
   border-top: 1px solid var(--vscode-editorGroup-border);
