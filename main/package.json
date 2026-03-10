@@ -27,7 +27,18 @@
     "chatgpt"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onCommand:cloakd.activate",
+    "onCommand:cloakd.openUI",
+    "onCommand:cloakd.anonymize",
+    "onCommand:cloakd.openRuleEditor",
+    "onCommand:cloakd.showMappings",
+    "onCommand:cloakd.clearMappings",
+    "onCommand:cloakd.scanIacFile",
+    "onCommand:cloakd.switchRulesheet",
+    "onCommand:cloakd.quickAddRule",
+    "onView:cloakd.mappingsView",
+    "onView:cloakd.rulesView",
+    "onChatParticipant:cloakd"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -211,7 +222,7 @@
         "cloakd.mappings.autoClearOnRulesheetSwitch": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically clear token mappings when switching the active rulesheet."
+          "description": "Deprecated compatibility switch. Cloakd now always clears token mappings when switching the active rulesheet."
         },
         "cloakd.agent.maxToolRounds": {
           "type": "number",

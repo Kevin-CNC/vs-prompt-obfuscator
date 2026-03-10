@@ -6,23 +6,35 @@ export interface PatternMatch {
     replacement: string;  // The replacement label
 }
 
+interface CompiledPattern {
+    pattern: string;
+    replacement: string;
+    regex: RegExp;
+}
+
 export class RegexPatternMatcher {
-    private patterns: Array<{ pattern: string; replacement: string }> = [];
+    private patterns: CompiledPattern[] = [];
 
     /**
      * Build the pattern matcher from regex patterns.
      * Invalid patterns are silently dropped with a console warning.
      */
     build(patterns: Array<{ pattern: string; replacement: string }>) {
-        this.patterns = patterns.filter(p => {
+        const nextPatterns: CompiledPattern[] = [];
+
+        for (const pattern of patterns) {
             try {
-                new RegExp(p.pattern);
-                return true;
+                nextPatterns.push({
+                    pattern: pattern.pattern,
+                    replacement: pattern.replacement,
+                    regex: new RegExp(pattern.pattern, 'g'),
+                });
             } catch {
-                console.warn(`[PatternMatcher] Invalid regex, skipping: ${p.pattern}`);
-                return false;
+                console.warn(`[PatternMatcher] Invalid regex, skipping: ${pattern.pattern}`);
             }
-        });
+        }
+
+        this.patterns = nextPatterns;
     }
 
     /**
@@ -42,9 +54,9 @@ export class RegexPatternMatcher {
             (a, b) => b.pattern.length - a.pattern.length
         );
 
-        for (const { pattern, replacement } of sortedPatterns) {
+        for (const { pattern, replacement, regex } of sortedPatterns) {
             try {
-                const regex = new RegExp(pattern, 'g');
+                regex.lastIndex = 0;
                 let match: RegExpExecArray | null;
 
                 while ((match = regex.exec(text)) !== null) {

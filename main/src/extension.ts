@@ -202,10 +202,6 @@ function shouldAutoClearOnSessionStart(folder: vscode.WorkspaceFolder): boolean 
     return getConfigForFolder(folder).get<boolean>('mappings.autoClearOnSessionStart', true);
 }
 
-function shouldAutoClearOnRulesheetSwitch(folder: vscode.WorkspaceFolder): boolean {
-    return getConfigForFolder(folder).get<boolean>('mappings.autoClearOnRulesheetSwitch', true);
-}
-
 function getToolDefinitions(folder: vscode.WorkspaceFolder): vscode.LanguageModelChatTool[] {
     const toolScope = getConfigForFolder(folder).get<string>('agent.toolScope', 'cloakdOnly');
 
@@ -260,8 +256,6 @@ async function processFileReferences(
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     console.log('The prompt hider is online.');
-
-    const initialSelection = await selectWorkspaceAndRulesheet(true);
     const fallbackWorkspaceFolder = vscode.workspace.workspaceFolders?.[0];
     const idleConfigPath = path.join(
         fallbackWorkspaceFolder?.uri.fsPath ?? context.globalStorageUri.fsPath,
@@ -269,8 +263,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         'idle.cloakd.json'
     );
  
-    let activeWorkspaceFolder = initialSelection?.workspaceFolder ?? fallbackWorkspaceFolder;
-    let activeRulesheetUri = initialSelection?.fileUri;
+    let activeWorkspaceFolder = fallbackWorkspaceFolder;
+    let activeRulesheetUri: vscode.Uri | undefined;
 
     if (activeWorkspaceFolder) {
         CloakdLogger.setWorkspaceRoot(activeWorkspaceFolder.uri.fsPath);
@@ -363,6 +357,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         activeRulesheetUri = selection.fileUri;
 
         configManager.setConfigFilePath(activeRulesheetUri.fsPath);
+        anonymizationEngine.invalidatePatternCache();
         commandExecutor.setConfigurationScope(activeWorkspaceFolder.uri);
         fileSystemTool.setWorkspaceScope(activeWorkspaceFolder.uri);
         CloakdLogger.setWorkspaceRoot(activeWorkspaceFolder.uri.fsPath);
@@ -375,9 +370,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 workspace: activeWorkspaceFolder.name,
             });
         }
-        if (reason === 'switch' && isRulesheetChanged && shouldAutoClearOnRulesheetSwitch(activeWorkspaceFolder)) {
+
+        if (reason === 'switch' && isRulesheetChanged) {
             tokenManager.clearMappings();
-            CloakdLogger.info('Token mappings auto-cleared on rulesheet switch.', {
+            CloakdLogger.info('Token mappings cleared on rulesheet switch (enforced privacy policy).', {
                 workspace: activeWorkspaceFolder.name,
                 rulesheet: path.basename(activeRulesheetUri.fsPath),
             });
@@ -410,12 +406,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return true;
     };
 
-    if (initialSelection) {
-        await applyRulesheetSelection(initialSelection, 'startup');
-    } else {
-        await updateStatusBar();
-        CloakdLogger.warn('Cloakd started in idle mode (no rulesheet selected).');
-    }
+    await updateStatusBar();
+    CloakdLogger.info('Cloakd started in lazy mode. Rulesheet selection is deferred until first use.');
 
     const toolDisposable = vscode.lm.registerTool('cloakd_execute_command', commandExecutor);
     const scpToolDisposable = vscode.lm.registerTool('cloakd_scp_transfer', scpTransferTool);
@@ -741,6 +733,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // quick-add rule command
     context.subscriptions.push(
         vscode.commands.registerCommand('cloakd.quickAddRule', async () => {
+            const hasRulesheet = await ensureActiveRulesheet('openUI');
+            if (!hasRulesheet) {
+                return;
+            }
+
             const editor = vscode.window.activeTextEditor;
             const selection = editor?.selection;
             const selectedText = selection && !selection.isEmpty ? editor.document.getText(selection) : undefined;
