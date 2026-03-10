@@ -3,6 +3,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ConfigManager } from '../utils/ConfigManager';
 import { validateRules } from '../anonymizer/RuleValidator';
+import {
+    exportableRules,
+    normalizeImportedRules,
+    normalizeRuleForStorage,
+    normalizeRulesForStorage,
+    toWebviewRule
+} from '../utils/RuleMetadata';
 
 export class RuleEditorProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'cloakd.rulesView';
@@ -48,7 +55,9 @@ export class RuleEditorProvider implements vscode.WebviewViewProvider {
                 }
 
                 case 'saveRules': {
-                    const rules = this.normalizeRules(message.rules as any[]);
+                    const loadedProject = await this._configManager.loadFullConfig();
+                    const currentRules = Array.isArray(loadedProject?.rules) ? loadedProject.rules : [];
+                    const rules = normalizeRulesForStorage(message.rules as any[], currentRules);
                     const validation = validateRules(rules);
                     if (!validation.valid) {
                         webviewView.webview.postMessage({
@@ -91,14 +100,10 @@ export class RuleEditorProvider implements vscode.WebviewViewProvider {
                     const loadedProject = await this._configManager.loadFullConfig();
                     const currentRules = Array.isArray(loadedProject?.rules) ? loadedProject.rules : [];
                     const ruleExistsIndx = currentRules.findIndex(r => r.id === ruleCarried.id);
-                    const normalizedRule = {
-                        id: ruleCarried.id,
-                        type: 'custom' as const,
-                        pattern: ruleCarried.pattern,
-                        replacement: ruleCarried.replacement,
-                        enabled: true,
-                        description: `Custom rule: ${ruleCarried.pattern} → ${ruleCarried.replacement}`,
-                    };
+                    const normalizedRule = normalizeRuleForStorage(
+                        ruleCarried,
+                        ruleExistsIndx !== -1 ? currentRules[ruleExistsIndx] : undefined
+                    );
 
                     if (ruleExistsIndx !== -1) {
                         currentRules[ruleExistsIndx] = normalizedRule;
@@ -160,6 +165,11 @@ export class RuleEditorProvider implements vscode.WebviewViewProvider {
                     break;
                 }
 
+                case 'openMainUi': {
+                    vscode.commands.executeCommand('cloakd.openUI');
+                    break;
+                }
+
                 case 'importRules': {
                     await this.importRulesToWebview(webviewView.webview);
                     break;
@@ -209,30 +219,16 @@ export class RuleEditorProvider implements vscode.WebviewViewProvider {
         return html;
     }
 
-    private normalizeRules(rules: any[]) {
-        return (rules ?? []).map(r => ({
-            id: String(r.id),
-            type: 'custom' as const,
-            pattern: String(r.pattern ?? ''),
-            replacement: String(r.replacement ?? ''),
-            enabled: true,
-            description: `Custom rule: ${String(r.pattern ?? '')} → ${String(r.replacement ?? '')}`,
-        }));
-    }
-
     private async postInit(webview: vscode.Webview): Promise<void> {
         const config = await this._configManager.loadFullConfig();
         const name = this._configManager.getRulesheetName();
         webview.postMessage({
             command: 'init',
+            viewMode: 'sidebar',
             rulesheetName: name,
             workspaceName: this._configManager.getWorkspaceFolderName(),
             rulesheetPath: this._configManager.getConfigFilePath(),
-            rules: (config?.rules ?? []).map(r => ({
-                id: r.id,
-                pattern: typeof r.pattern === 'string' ? r.pattern : r.pattern.source,
-                replacement: r.replacement,
-            })),
+            rules: (config?.rules ?? []).map(r => toWebviewRule(r)),
             enabled: config?.enabled ?? false,
         });
     }
@@ -257,13 +253,7 @@ export class RuleEditorProvider implements vscode.WebviewViewProvider {
             const content = fs.readFileSync(picked[0].fsPath, 'utf8');
             const parsed = JSON.parse(content) as any;
             const sourceRules = Array.isArray(parsed) ? parsed : Array.isArray(parsed.rules) ? parsed.rules : [];
-            const normalizedRules = sourceRules
-                .map((r: any) => ({
-                    id: String(r.id ?? `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
-                    pattern: typeof r.pattern === 'string' ? r.pattern : String(r.pattern?.source ?? ''),
-                    replacement: String(r.replacement ?? ''),
-                }))
-                .filter((r: { pattern: string; replacement: string }) => r.pattern.trim() !== '' || r.replacement.trim() !== '');
+            const normalizedRules = normalizeImportedRules(sourceRules);
 
             webview.postMessage({
                 command: 'importedRules',
@@ -288,13 +278,7 @@ export class RuleEditorProvider implements vscode.WebviewViewProvider {
         }
 
         try {
-            const normalizedRules = (rules ?? [])
-                .map(r => ({
-                    id: String(r.id),
-                    pattern: String(r.pattern ?? ''),
-                    replacement: String(r.replacement ?? ''),
-                }))
-                .filter((r: { pattern: string; replacement: string }) => r.pattern.trim() !== '' || r.replacement.trim() !== '');
+            const normalizedRules = exportableRules(rules ?? []);
 
             fs.writeFileSync(saveUri.fsPath, JSON.stringify({
                 version: 1,
