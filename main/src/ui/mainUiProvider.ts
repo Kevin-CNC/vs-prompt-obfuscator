@@ -211,9 +211,19 @@ export class mainUIProvider {
                     break;
                 }
 
+                case 'scanCurrentFile': {
+                    vscode.commands.executeCommand('cloakd.scanCurrentFile');
+                    break;
+                }
+
                 case 'scanIacFile': {
                     // Delegate to the registered command which handles the file picker + scanning
                     vscode.commands.executeCommand('cloakd.scanIacFile');
+                    break;
+                }
+
+                case 'scanSecrets': {
+                    vscode.commands.executeCommand('cloakd.scanSecrets');
                     break;
                 }
             }
