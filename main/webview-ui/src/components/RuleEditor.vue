@@ -54,7 +54,7 @@
 
     <div class="rules-grid-wrapper">
       <div class="grid-header" aria-hidden="true">
-        <div class="col-pattern">Pattern (Regex)</div>
+        <div class="col-pattern">Pattern (Regex or Wildcard)</div>
         <div class="col-replacement">Replacement</div>
         <div class="col-type">Type</div>
         <div class="col-enabled">Enabled</div>
@@ -98,7 +98,7 @@
             <vscode-text-field
               :value="rule.pattern"
               @input="updateRule(rule.id, 'pattern', ($event.target as HTMLInputElement).value)"
-              placeholder="e.g., \b\d{1,3}(\.\d{1,3}){3}\b"
+              placeholder="e.g., 10.123.*.* or \b\d{1,3}(\.\d{1,3}){3}\b"
               class="field-full"
               aria-label="Pattern"
             ></vscode-text-field>
@@ -344,6 +344,10 @@ const keybindingEntries: HelpEntry[] = [
     label: 'Scan File Picker',
     shortcut: 'Ctrl+Alt+Shift+S',
     description: 'Open a file picker and scan a saved file without changing the active editor tab.',
+  },
+  {
+    label: 'Wildcard Patterns',
+    description: 'Use * for any sequence and ? for a single character (for example: 10.123.*.* or *@ambrosio.com).',
   },
 ];
 
