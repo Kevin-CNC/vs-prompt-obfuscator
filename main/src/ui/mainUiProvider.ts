@@ -76,7 +76,7 @@ export class mainUIProvider {
             mainUIProvider.currentPanel = undefined;
         });
 
-        // ---- Handle messages from the webview ----
+        // ---- Handle messages from the webview ---- ////
         panel.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
                 case 'ready': {
