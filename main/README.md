@@ -1,6 +1,6 @@
 # Cloakd
 
-<div align="center">  
+<div align="center">
   <b>Anonymize sensitive data before it reaches language models.</b>
 </div>
 
@@ -10,84 +10,96 @@
 
 | Section | Purpose |
 |---------|---------|
-| [Overview](#overview) | What Cloakd does |
-| [Features](#features) | Key capabilities |
-| [Getting Started](#getting-started) | Quick setup guide |
-| [Configuration](#configuration) | Settings reference |
-| [Architecture](#architecture) | How it works |
-| [License](#license) | Licensing information |
+| [What Cloakd Does](#what-cloakd-does) | Beginner overview |
+| [How It Works](#how-it-works) | Privacy model in plain language |
+| [Newest Features](#newest-features) | Recent capabilities and UI updates |
+| [Quick Start for Beginners](#quick-start-for-beginners) | First successful setup |
+| [Daily Workflows](#daily-workflows) | Common tasks with examples |
+| [Wrapped Tool Trust Policy](#wrapped-tool-trust-policy) | Safe use of non-Cloakd tools |
+| [Commands and Shortcuts](#commands-and-shortcuts) | Full command list |
+| [Configuration](#configuration) | Important settings and defaults |
+| [Limitations](#limitations) | Current boundaries |
+| [Troubleshooting](#troubleshooting) | Fix common setup issues |
 
 ---
 
-## Overview
+## What Cloakd Does
 
-Cloakd is a VS Code extension that automatically anonymizes sensitive values before they're sent to language models. It maintains a strict privacy boundary: secrets are anonymized before reaching the LM, de-anonymized only in local tool implementations, and re-anonymized before returning results.
+Cloakd is a VS Code extension that helps you use AI tools without exposing raw secrets.
 
-**What it solves:**
-- API keys, passwords, and credentials sent to language models
-- Infrastructure details exposed in prompts and responses
-- De-anonymization leaking secrets back to external systems
-- Manual tracking of sensitive information across prompts
+It replaces sensitive values (for example API keys, hostnames, IPs, emails, paths, tokens) with anonymized placeholders before data reaches the model.
 
----
+Example:
 
-## Features
+- Original: `Deploy to 10.4.1.25 with key sk_live_ABC123`
+- Sent to model: `Deploy to IP_1 with key API_KEY_1`
 
-**Anonymous Pattern Matching** — Regex-based patterns with built-in support for IPs, emails, UUIDs, API keys, JWT tokens, and private keys.
-
-**Rule Editor** — Vue.js interface for managing anonymization rules in per-workspace `.cloakd/` files.
-
-**IaC Scanner** — Detects Terraform secrets (AWS account IDs, ARNs, CIDR blocks, credentials) and suggests rules.
-
-**Token Consistency** — Maps secrets to stable tokens (e.g., `IP_1`, `API_KEY_2`) for reliable LM interaction.
-
-**LM Tool Integration** — Three tools with full anonymization: command execution, SCP transfers, and filesystem operations.
-
-**@Cloakd Chat Participant** — Built-in VS Code Chat integration with automatic anonymization.
+This keeps model-visible text safer while preserving enough context for useful AI help.
 
 ---
 
-## Technology Stack
+## How It Works
 
-TypeScript • VS Code Extension API • Vue.js 3 • Tailwind CSS • Vite • Webpack • JSON
+Cloakd follows a strict boundary:
 
----
+1. Anonymize before model access.
+2. De-anonymize only inside trusted local tool execution paths.
+3. Re-anonymize tool outputs before returning text to model-visible flows.
 
-## Commands
-
-- `cloakd.activate` — Activate extension with ruleset selection
-- `cloakd.openUI` — Open main rule editor panel
-- `cloakd.openRuleEditor` — Open sidebar rule editor
-- `cloakd.showMappings` — Display current token mappings
-- `cloakd.clearMappings` — Clear all token mappings
-- `cloakd.scanCurrentFile` — Scan the active editor for likely secrets
-- `cloakd.scanIacFile` — Scan file for detectable secrets
-- `cloakd.scanSecrets` — Pick a file and scan it for likely secrets
-- `cloakd.switchRulesheet` — Switch active ruleset
-- `cloakd.quickAddRule` — Add a rule from command palette
-
-**Default keybindings:**
-- `Ctrl+Shift+A` — Quick add a rule from the current selection
-- `Ctrl+Alt+S` — Scan the current open file for likely secrets
-- `Ctrl+Alt+Shift+S` — Pick a file and scan it for likely secrets
-
-Cloakd activates lazily when a Cloakd command, sidebar view, or `@Cloakd` chat is used to ensure a smoother development experience with, or without it.
+In practice, you keep working normally while Cloakd handles token mapping and privacy controls in the background.
 
 ---
 
-## Getting Started
+## Newest Features
 
-**Installation:**
-1. Open VS Code Extensions (Ctrl+Shift+X)
-2. Search for "Cloakd" and install
+### 1) Dynamic Wrapped Tools (feature flag)
 
-**Setup:**
-1. Run command: `Cloakd: Open UI`
-2. Create a new ruleset (e.g., `my-project`)
-3. Add rules manually or use the IaC scanner to detect secrets
-4. In VS Code Chat, use `@Cloakd` to anonymize your prompts
+Cloakd can now expose wrapped aliases for non-native tools.
 
-**Example rule:**
+- Alias pattern: `cloakd_wrap_<toolName>`
+- Default policy: `tokenOnly` (safe default)
+- Optional policies: selective or trusted de-anonymization
+
+### 2) Wrapped Tool Trust Policy panel
+
+The main UI now includes a dedicated section for wrapped-tool trust configuration.
+
+- Enable or disable dynamic wrapping
+- Select mode (`strict`, `balanced`, `trustedLocal`)
+- Edit optional JSON overrides
+
+### 3) Cleaner UI structure
+
+Main UI is split into separate submenus to reduce clutter:
+
+- `Rule Addition`
+- `Wrapped Tool Trust Policy`
+
+### 4) Safer settings persistence
+
+Dynamic wrapping settings are now written using supported configuration scope behavior, reducing settings-write errors in multi-folder contexts.
+
+---
+
+## Quick Start for Beginners
+
+### Step 1: Install and open Cloakd
+
+1. Install the extension.
+2. Run `Cloakd: Open Main UI`.
+
+### Step 2: Create your first rulesheet
+
+1. Run `Cloakd: Create Rulesheet`.
+2. Choose your workspace folder.
+3. Create a `.cloakd/<name>.cloakd.json` rulesheet.
+
+### Step 3: Add a simple rule
+
+Use `Rule Addition` in the main UI, or highlight text and run `Cloakd: Quick Add Rule`.
+
+Example rule:
+
 ```json
 {
   "id": "rule-1",
@@ -98,47 +110,164 @@ Cloakd activates lazily when a Cloakd command, sidebar view, or `@Cloakd` chat i
 }
 ```
 
+### Step 4: Use Cloakd in chat
+
+In VS Code Chat, explicitly use `@Cloakd`.
+
+Important: Cloakd protection is designed for the `@Cloakd` participant flow.
+
+---
+
+## Daily Workflows
+
+### Workflow A: Ask AI about logs safely
+
+1. Paste log snippets in `@Cloakd` chat.
+2. Cloakd anonymizes matching sensitive values.
+3. Model responds using tokenized placeholders.
+
+### Workflow B: Scan files and generate rules
+
+1. Run `Cloakd: Scan Current File for Secrets` or `Cloakd: Scan File for Secrets`.
+2. Review detected items in UI.
+3. Save selected rules.
+
+### Workflow C: Use local tools through Cloakd
+
+With `@Cloakd`, model can use:
+
+- `cloakd_execute_command`
+- `cloakd_scp_transfer`
+- `cloakd_filesystem`
+
+These tools preserve Cloakd privacy boundaries during invocation and result handling.
+
+---
+
+## Wrapped Tool Trust Policy
+
+Use this only when you need non-native or third-party tools in the loop.
+
+### Modes
+
+- `strict`: safest default behavior
+- `balanced`: still conservative, tuned for practicality
+- `trustedLocal`: allows more de-anonymization flexibility for trusted local use
+
+### Recommended rollout
+
+1. Start with `enabled = false`.
+2. Enable dynamic wrapping only when needed.
+3. Keep mode as `strict` first.
+4. Add per-tool overrides only after validating behavior.
+
+### Optional policy override example
+
+```json
+{
+  "defaultPolicy": {
+    "mode": "tokenOnly",
+    "allowExternal": false,
+    "maxInputSize": 100000,
+    "maxOutputSize": 150000
+  },
+  "perTool": {
+    "exampleTrustedTool": {
+      "mode": "selectiveDeanonymize",
+      "allowExternal": true,
+      "allowedInputPaths": ["credentials.password"]
+    }
+  }
+}
+```
+
+---
+
+## Commands and Shortcuts
+
+### Core commands
+
+- `cloakd.activate` - Create Rulesheet
+- `cloakd.openUI` - Open Main UI
+- `cloakd.openRuleEditor` - Open Rule Editor
+- `cloakd.switchRulesheet` - Switch Active Rulesheet
+- `cloakd.showMappings` - Show Token Mappings
+- `cloakd.clearMappings` - Clear Token Mappings
+- `cloakd.anonymize` - Anonymize Selection
+- `cloakd.quickAddRule` - Quick Add Rule
+
+### Scanner commands
+
+- `cloakd.scanCurrentFile` - Scan Current File for Secrets
+- `cloakd.scanSecrets` - Scan File for Secrets
+- `cloakd.scanIacFile` - Scan IaC File for Patterns
+
+### Default shortcuts
+
+- `Ctrl+Shift+A` - Quick Add Rule
+- `Ctrl+Alt+S` - Scan Current File for Secrets
+- `Ctrl+Alt+Shift+S` - Scan File for Secrets
+
 ---
 
 ## Configuration
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `cloakd.agent.maxToolRounds` | `10` | Max tool execution rounds |
-| `cloakd.agent.executionMode` | `captured` | Tool mode: `captured` or `terminal` |
-| `cloakd.agent.toolScope` | `cloakdOnly` | Available tools: `cloakdOnly` or `all` |
-| `cloakd.mappings.autoClearOnSessionStart` | `true` | Clear mappings on new session |
-| `cloakd.mappings.autoClearOnRulesheetSwitch` | `true` | Deprecated compatibility switch. Cloakd always clears mappings on rulesheet switch. |
-| `cloakd.logging.level` | `warn` | Log level: `debug`, `info`, `warn`, `error` |
+| `cloakd.agent.maxToolRounds` | `10` | Maximum LM tool-call rounds in a chat loop |
+| `cloakd.agent.executionMode` | `captured` | Tool execution mode: `captured` or `terminal` |
+| `cloakd.agent.toolScope` | `cloakdOnly` | Expose only Cloakd tools or all tools |
+| `cloakd.agent.dynamicToolWrapping.enabled` | `false` | Enable wrapped aliases for non-Cloakd tools |
+| `cloakd.agent.dynamicToolWrapping.mode` | `strict` | Baseline wrapped-tool trust mode |
+| `cloakd.agent.dynamicToolWrapping.policies` | `{}` | Optional default and per-tool policy overrides |
+| `cloakd.mappings.autoClearOnSessionStart` | `true` | Clear token mappings when a new session starts |
+| `cloakd.mappings.autoClearOnRulesheetSwitch` | `true` | Deprecated compatibility setting; switch clears mappings by policy |
+| `cloakd.logging.level` | `warn` | Logging verbosity: `error`, `warn`, `info`, `debug` |
 
 ---
 
-## Architecture
+## Limitations
 
-**Anonymization Engine** — Loads enabled rules, compiles regex patterns (longest-first), finds non-overlapping matches, generates consistent tokens, and replaces in reverse order.
+- Cloakd privacy guarantees are centered on `@Cloakd` chat participant flows.
+- If you expose all tools and over-trust unknown tools, risk increases.
+- Pattern quality affects anonymization quality. Poor regex patterns can over-match or miss values.
 
-**Token Manager** — Maintains mappings between original values and tokens, persisted in VS Code's `workspaceState`.
+---
 
-**IaC Scanner** — Detects Terraform-specific secrets or uses generic fallback patterns.
+## Troubleshooting
 
-**LM Tools** — Three tools with full de/re-anonymization:
-- `cloakd_execute_command` — Run shell commands safely
-- `cloakd_scp_transfer` — Secure file transfers
-- `cloakd_filesystem` — File read/write/patch/delete operations
+### Main UI looks outdated
 
-**Privacy Boundary:**
-1. Input anonymized before reaching the LM
-2. De-anonymized only in local tool code
-3. Tool outputs re-anonymized before returning to model
+Run webview build and reload VS Code window:
+
+1. `npm run webview:build`
+2. Reload window
+
+### Wrapped trust policy settings do not save
+
+- Ensure extension is updated.
+- Save from the `Wrapped Tool Trust Policy` submenu in main UI.
+- If needed, reload VS Code so updated contributed settings metadata is picked up.
+
+### Model still sees real values
+
+1. Confirm your prompt is sent with `@Cloakd`.
+2. Verify rules are enabled.
+3. Test with a known sample value that should match.
 
 ---
 
 ## License
 
-Kept under MIT licence as of 08/02/2026 (dd/mm/yy).
+MIT.
 
 ---
 
 ## Support
 
-Questions or issues? Open a GitHub issue in the project repository.
+Open a GitHub issue in the project repository with:
+
+1. VS Code version
+2. Cloakd version
+3. Minimal reproduction steps
+4. Redacted logs/screenshots

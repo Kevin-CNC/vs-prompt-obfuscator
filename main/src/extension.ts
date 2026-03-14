@@ -13,6 +13,10 @@ import { IacScanner } from './scanner/IacScanner';
 import { SecretScanner } from './scanner/SecretScanner';
 import { CloakdLogger } from './utils/CloakdLogger';
 import { validateRules } from './anonymizer/RuleValidator';
+import { createAnonymizedModel, type Anonymizer } from './anonymizedModel';
+import { ToolOutputSanitizer } from './tools/ToolOutputSanitizer';
+import { DEFAULT_TOOL_POLICY, ToolPolicyEngine, type ToolWrappingPolicy } from './tools/ToolPolicy';
+import { WrappedToolRegistry, isCloakdNativeTool } from './tools/WrappedToolRegistry';
 import * as fs from 'fs';
 import { AnonymizationRule } from './anonymizer/PatternLibrary';
 
@@ -22,6 +26,58 @@ let hasWarnedAboutAllToolScope = false;
 interface RulesheetSelection {
     workspaceFolder: vscode.WorkspaceFolder;
     fileUri: vscode.Uri;
+}
+
+async function sanitizeToolCallInput(
+    toolInput: unknown,
+    anonymizationEngine: AnonymizationEngine
+): Promise<object> {
+    const serialized = JSON.stringify(toolInput ?? {});
+    const anonResult = await anonymizationEngine.anonymize(serialized);
+    const parsed: unknown = JSON.parse(anonResult.anonymized);
+    if (parsed === null || typeof parsed !== 'object') {
+        throw new Error('Sanitized tool input must be a JSON object.');
+    }
+
+    return parsed;
+}
+
+function escapeRegex(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function deAnonymizeText(text: string, tokenManager: TokenManager): string {
+    const reverseMappings = tokenManager.getReverseMappings();
+    const sortedTokens = [...reverseMappings.keys()].sort((a, b) => b.length - a.length);
+    let result = text;
+
+    for (const token of sortedTokens) {
+        const original = reverseMappings.get(token);
+        if (!original) {
+            continue;
+        }
+
+        result = result.replace(new RegExp(escapeRegex(token), 'g'), original);
+    }
+
+    return result;
+}
+
+function reAnonymizeText(text: string, tokenManager: TokenManager): string {
+    const mappings = tokenManager.getAllMappings();
+    const sortedOriginals = [...mappings.keys()].sort((a, b) => b.length - a.length);
+    let result = text;
+
+    for (const originalValue of sortedOriginals) {
+        const token = mappings.get(originalValue);
+        if (!token) {
+            continue;
+        }
+
+        result = result.replace(new RegExp(escapeRegex(originalValue), 'g'), token);
+    }
+
+    return result;
 }
 
 function sanitizeRulesheetName(input: string | undefined): string {
@@ -203,8 +259,17 @@ function shouldAutoClearOnSessionStart(folder: vscode.WorkspaceFolder): boolean 
     return getConfigForFolder(folder).get<boolean>('mappings.autoClearOnSessionStart', true);
 }
 
-function getToolDefinitions(folder: vscode.WorkspaceFolder): vscode.LanguageModelChatTool[] {
+interface ToolExposurePlan {
+    toolDefinitions: vscode.LanguageModelChatTool[];
+    wrappedToolRegistry: WrappedToolRegistry;
+    policyEngine: ToolPolicyEngine;
+    dynamicWrappingEnabled: boolean;
+}
+
+function getToolExposurePlan(folder: vscode.WorkspaceFolder, configManager: ConfigManager): ToolExposurePlan {
     const toolScope = getConfigForFolder(folder).get<string>('agent.toolScope', 'cloakdOnly');
+    const dynamicWrappingEnabled = configManager.getDynamicToolWrappingEnabled(folder.uri);
+    const dynamicWrappingMode = configManager.getDynamicToolWrappingMode(folder.uri);
 
     if (toolScope === 'all' && !hasWarnedAboutAllToolScope) {
         hasWarnedAboutAllToolScope = true;
@@ -218,11 +283,55 @@ function getToolDefinitions(folder: vscode.WorkspaceFolder): vscode.LanguageMode
         ? vscode.lm.tools
         : vscode.lm.tools.filter(t => t.name.startsWith('cloakd_'));
 
-    return visibleTools.map(t => ({
-        name: t.name,
-        description: t.description,
-        inputSchema: t.inputSchema ?? {}
-    }));
+    const policyOverrides = configManager.loadDynamicToolWrappingPolicies(folder.uri);
+    const modeDefaultPolicy: Partial<ToolWrappingPolicy> =
+        dynamicWrappingMode === 'trustedLocal'
+            ? { mode: 'selectiveDeanonymize', allowExternal: false }
+            : dynamicWrappingMode === 'balanced'
+                ? { mode: 'tokenOnly', allowExternal: false, maxOutputSize: 120_000 }
+                : { ...DEFAULT_TOOL_POLICY };
+
+    const policyEngine = new ToolPolicyEngine({
+        defaultPolicy: {
+            ...modeDefaultPolicy,
+            ...policyOverrides.defaultPolicy,
+        },
+        perTool: policyOverrides.perTool,
+    });
+
+    const wrappedToolRegistry = new WrappedToolRegistry(visibleTools, {
+        shouldWrapTool: (toolName: string) => !isCloakdNativeTool(toolName),
+    });
+
+    if (!dynamicWrappingEnabled || toolScope !== 'all') {
+        return {
+            toolDefinitions: visibleTools.map(t => ({
+                name: t.name,
+                description: t.description,
+                inputSchema: t.inputSchema ?? {}
+            })),
+            wrappedToolRegistry,
+            policyEngine,
+            dynamicWrappingEnabled: false,
+        };
+    }
+
+    const nativeToolDefinitions = visibleTools
+        .filter(tool => isCloakdNativeTool(tool.name))
+        .map(tool => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema ?? {}
+        }));
+
+    const wrappedDefinitions = wrappedToolRegistry.getWrappedToolDefinitions();
+
+    return {
+        toolDefinitions: [...nativeToolDefinitions, ...wrappedDefinitions],
+        wrappedToolRegistry,
+        policyEngine,
+        dynamicWrappingEnabled: true,
+    };
 }
 
 async function processFileReferences(
@@ -289,6 +398,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     const scpTransferTool = new ScpTransferTool(commandExecutor);
     const fileSystemTool = new FileSystemTool(anonymizationEngine, tokenManager);
+    const toolOutputSanitizer = new ToolOutputSanitizer();
     if (activeWorkspaceFolder) {
         fileSystemTool.setWorkspaceScope(activeWorkspaceFolder.uri);
     }
@@ -606,8 +716,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             );
         }
 
-        const toolDefs = getToolDefinitions(activeWorkspaceFolder);
+        const toolExposurePlan = getToolExposurePlan(activeWorkspaceFolder, configManager);
+        const toolDefs = toolExposurePlan.toolDefinitions;
         const maxToolRounds = getMaxToolRounds(activeWorkspaceFolder);
+        const wrappedModelAnonymizer: Anonymizer = {
+            anonymize: async (text: string): Promise<string> => {
+                const anonymized = await anonymizationEngine.anonymize(text);
+                return anonymized.anonymized;
+            }
+        };
+        const wrappedModel = createAnonymizedModel(request.model, wrappedModelAnonymizer);
 
         try {
             let continueLoop = true;
@@ -622,7 +740,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     break;
                 }
 
-                const modelResponse = await request.model.sendRequest(
+                const modelResponse = await wrappedModel.sendRequest(
                     messages,
                     { tools: toolDefs },
                     token
@@ -650,17 +768,56 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                         }
 
                         try {
+                            const sanitizedInput = await sanitizeToolCallInput(part.input, anonymizationEngine);
+                            const originalToolName = toolExposurePlan.dynamicWrappingEnabled
+                                ? toolExposurePlan.wrappedToolRegistry.resolveOriginalName(part.name)
+                                : undefined;
+                            const invokeToolName = originalToolName ?? part.name;
+                            const policy = originalToolName
+                                ? toolExposurePlan.policyEngine.resolvePolicy(originalToolName)
+                                : DEFAULT_TOOL_POLICY;
+
+                            if (originalToolName && !toolExposurePlan.policyEngine.canInvokeExternalTool(originalToolName, policy)) {
+                                throw new Error(
+                                    `Wrapped tool blocked by policy: ${originalToolName}. ` +
+                                    'Set tokenOnly mode or explicitly allow external calls for this tool.'
+                                );
+                            }
+
+                            const invocationInput = originalToolName
+                                ? toolExposurePlan.policyEngine.prepareInputForInvocation(
+                                    sanitizedInput,
+                                    policy,
+                                    (value: string) => deAnonymizeText(value, tokenManager)
+                                )
+                                : sanitizedInput;
+
+                            if (originalToolName) {
+                                CloakdLogger.info('Wrapped tool invocation policy decision.', {
+                                    wrappedName: part.name,
+                                    originalName: originalToolName,
+                                    mode: policy.mode,
+                                    allowExternal: policy.allowExternal,
+                                });
+                            }
+
                             const toolResult = await vscode.lm.invokeTool(
-                                part.name,
+                                invokeToolName,
                                 {
-                                    input: part.input,
+                                    input: invocationInput,
                                     toolInvocationToken: request.toolInvocationToken
                                 },
                                 token
                             );
 
+                            const sanitizedContent = toolOutputSanitizer.sanitizeToolContent(
+                                toolResult.content,
+                                (value: string) => reAnonymizeText(value, tokenManager),
+                                { maxOutputSize: policy.maxOutputSize }
+                            );
+
                             toolResultParts.push(
-                                new vscode.LanguageModelToolResultPart(part.callId, toolResult.content)
+                                new vscode.LanguageModelToolResultPart(part.callId, sanitizedContent)
                             );
                         } catch (error) {
                             const message = error instanceof Error ? error.message : String(error);
