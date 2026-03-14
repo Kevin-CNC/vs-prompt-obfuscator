@@ -5,7 +5,6 @@ import * as vscode from 'vscode';
  */
 export interface Anonymizer {
     anonymize(text: string): string | Promise<string>;
-    deanonymize(text: string): string;
 }
 
 function assertNever(value: never, message: string): never {
@@ -109,63 +108,27 @@ export async function anonymizeMessages(
 }
 
 /**
- * Lazily wraps a model response stream and deanonymizes text chunks in-flight.
- */
-export function wrapResponseStream(
-    stream: AsyncIterable<vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart | vscode.LanguageModelDataPart | unknown>,
-    anonymizer: Anonymizer
-): AsyncIterable<vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart | vscode.LanguageModelDataPart | unknown> {
-    async function* transform(): AsyncIterable<vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart | vscode.LanguageModelDataPart | unknown> {
-        for await (const chunk of stream) {
-            if (chunk instanceof vscode.LanguageModelTextPart) {
-                yield new vscode.LanguageModelTextPart(anonymizer.deanonymize(chunk.value));
-                continue;
-            }
-
-            yield chunk;
-        }
-    }
-
-    return transform();
-}
-
-/**
  * Create a drop-in LanguageModelChat wrapper that enforces Cloakd anonymization boundaries.
  */
 export function createAnonymizedModel(
     model: vscode.LanguageModelChat,
     anonymizer: Anonymizer
 ): vscode.LanguageModelChat {
-    const handler: ProxyHandler<vscode.LanguageModelChat> = {
-        get(target, property, receiver): unknown {
-            if (property === 'sendRequest') {
-                return async (
-                    messages: vscode.LanguageModelChatMessage[],
-                    options?: vscode.LanguageModelChatRequestOptions,
-                    token?: vscode.CancellationToken
-                ): Promise<vscode.LanguageModelChatResponse> => {
-                    const anonymizedMessages = await anonymizeMessages(messages, anonymizer);
-                    const response = await target.sendRequest(anonymizedMessages, options, token);
+    const wrappedModel = Object.create(model) as vscode.LanguageModelChat;
 
-                    return {
-                        stream: wrapResponseStream(response.stream, anonymizer),
-                        text: (async function* (): AsyncIterable<string> {
-                            for await (const textChunk of response.text) {
-                                yield anonymizer.deanonymize(textChunk);
-                            }
-                        })(),
-                    };
-                };
-            }
-
-            const value = Reflect.get(target, property, receiver);
-            if (typeof value === 'function') {
-                return value.bind(target);
-            }
-
-            return value;
+    Object.defineProperty(wrappedModel, 'sendRequest', {
+        value: async (
+            messages: vscode.LanguageModelChatMessage[],
+            options?: vscode.LanguageModelChatRequestOptions,
+            token?: vscode.CancellationToken
+        ): Promise<vscode.LanguageModelChatResponse> => {
+            const anonymizedMessages = await anonymizeMessages(messages, anonymizer);
+            return await model.sendRequest(anonymizedMessages, options, token);
         },
-    };
+        configurable: true,
+        enumerable: false,
+        writable: false,
+    });
 
-    return new Proxy(model, handler);
+    return wrappedModel;
 }
