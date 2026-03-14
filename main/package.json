@@ -279,6 +279,29 @@
           ],
           "description": "Controls which language-model tools are exposed to @Cloakd. 'cloakdOnly' is recommended for privacy. 'all' is retained for compatibility but may expose non-Cloakd tools that are outside Cloakd's anonymization boundary and is planned for deprecation."
         },
+        "cloakd.agent.dynamicToolWrapping.enabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "Enable Cloakd wrapped aliases for non-native LM tools. Disabled by default to preserve existing behavior."
+        },
+        "cloakd.agent.dynamicToolWrapping.mode": {
+          "type": "string",
+          "default": "strict",
+          "scope": "resource",
+          "enum": [
+            "strict",
+            "balanced",
+            "trustedLocal"
+          ],
+          "description": "Baseline policy preset for wrapped tools. strict=token-only defaults, balanced=token-only with larger output budget, trustedLocal=selective de-anonymization baseline."
+        },
+        "cloakd.agent.dynamicToolWrapping.policies": {
+          "type": "object",
+          "default": {},
+          "scope": "resource",
+          "description": "Optional wrapped tool policy overrides. Supports defaultPolicy and perTool policy maps with mode, allowedInputPaths, allowExternal, maxInputSize, and maxOutputSize."
+        },
         "cloakd.logging.level": {
           "type": "string",
           "default": "warn",
