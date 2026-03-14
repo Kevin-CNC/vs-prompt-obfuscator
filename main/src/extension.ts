@@ -25,24 +25,18 @@ interface RulesheetSelection {
     fileUri: vscode.Uri;
 }
 
-function escapeRegex(value: string): string {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function deanonymizeWithTokenManager(text: string, tokenManager: TokenManager): string {
-    const reverseMappings = tokenManager.getReverseMappings();
-    const sortedTokens = [...reverseMappings.keys()].sort((a, b) => b.length - a.length);
-
-    let result = text;
-    for (const token of sortedTokens) {
-        const originalValue = reverseMappings.get(token);
-        if (originalValue === undefined) {
-            continue;
-        }
-        result = result.replace(new RegExp(escapeRegex(token), 'g'), originalValue);
+async function sanitizeToolCallInput(
+    toolInput: unknown,
+    anonymizationEngine: AnonymizationEngine
+): Promise<object> {
+    const serialized = JSON.stringify(toolInput ?? {});
+    const anonResult = await anonymizationEngine.anonymize(serialized);
+    const parsed: unknown = JSON.parse(anonResult.anonymized);
+    if (parsed === null || typeof parsed !== 'object') {
+        throw new Error('Sanitized tool input must be a JSON object.');
     }
 
-    return result;
+    return parsed;
 }
 
 function sanitizeRulesheetName(input: string | undefined): string {
@@ -633,8 +627,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             anonymize: async (text: string): Promise<string> => {
                 const anonymized = await anonymizationEngine.anonymize(text);
                 return anonymized.anonymized;
-            },
-            deanonymize: (text: string): string => deanonymizeWithTokenManager(text, tokenManager),
+            }
         };
         const wrappedModel = createAnonymizedModel(request.model, wrappedModelAnonymizer);
 
@@ -679,10 +672,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                         }
 
                         try {
+                            const sanitizedInput = await sanitizeToolCallInput(part.input, anonymizationEngine);
                             const toolResult = await vscode.lm.invokeTool(
                                 part.name,
                                 {
-                                    input: part.input,
+                                    input: sanitizedInput,
                                     toolInvocationToken: request.toolInvocationToken
                                 },
                                 token
