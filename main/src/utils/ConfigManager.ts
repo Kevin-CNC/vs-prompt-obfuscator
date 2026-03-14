@@ -3,6 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { AnonymizationRule } from '../anonymizer/PatternLibrary';
 import { CloakdLogger } from './CloakdLogger';
+import { type ToolWrappingPolicyConfig } from '../tools/ToolPolicy';
+
+export type DynamicToolWrappingMode = 'strict' | 'balanced' | 'trustedLocal';
 
 export interface ProjectConfig {
     version: string;
@@ -264,6 +267,62 @@ export class ConfigManager {
         } catch {
             return undefined;
         }
+    }
+
+    private getConfiguration(scopeUri?: vscode.Uri): vscode.WorkspaceConfiguration {
+        const effectiveScope = scopeUri ?? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.configFilePath))?.uri;
+        return vscode.workspace.getConfiguration('cloakd', effectiveScope);
+    }
+
+    getDynamicToolWrappingEnabled(scopeUri?: vscode.Uri): boolean {
+        return this.getConfiguration(scopeUri).get<boolean>('agent.dynamicToolWrapping.enabled', false);
+    }
+
+    getDynamicToolWrappingMode(scopeUri?: vscode.Uri): DynamicToolWrappingMode {
+        const configured = this.getConfiguration(scopeUri).get<string>('agent.dynamicToolWrapping.mode', 'strict');
+        if (configured === 'balanced' || configured === 'trustedLocal' || configured === 'strict') {
+            return configured;
+        }
+
+        return 'strict';
+    }
+
+    loadDynamicToolWrappingPolicies(scopeUri?: vscode.Uri): ToolWrappingPolicyConfig {
+        const cfg = this.getConfiguration(scopeUri);
+        const raw = cfg.get<unknown>('agent.dynamicToolWrapping.policies', {});
+
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+            return {};
+        }
+
+        return raw as ToolWrappingPolicyConfig;
+    }
+
+    async saveDynamicToolWrappingPolicies(
+        policies: ToolWrappingPolicyConfig,
+        scopeUri?: vscode.Uri,
+        configurationTarget: vscode.ConfigurationTarget = vscode.ConfigurationTarget.Workspace
+    ): Promise<void> {
+        const cfg = this.getConfiguration(scopeUri);
+        await cfg.update('agent.dynamicToolWrapping.policies', policies, configurationTarget);
+    }
+
+    async saveDynamicToolWrappingEnabled(
+        enabled: boolean,
+        scopeUri?: vscode.Uri,
+        configurationTarget: vscode.ConfigurationTarget = vscode.ConfigurationTarget.Workspace
+    ): Promise<void> {
+        const cfg = this.getConfiguration(scopeUri);
+        await cfg.update('agent.dynamicToolWrapping.enabled', enabled, configurationTarget);
+    }
+
+    async saveDynamicToolWrappingMode(
+        mode: DynamicToolWrappingMode,
+        scopeUri?: vscode.Uri,
+        configurationTarget: vscode.ConfigurationTarget = vscode.ConfigurationTarget.Workspace
+    ): Promise<void> {
+        const cfg = this.getConfiguration(scopeUri);
+        await cfg.update('agent.dynamicToolWrapping.mode', mode, configurationTarget);
     }
 
 }
